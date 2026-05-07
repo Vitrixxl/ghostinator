@@ -32,6 +32,31 @@ export function isRealtimeEnabled(): boolean {
   return Boolean(url && anonKey);
 }
 
+/* Diagnostic exposé en DevTools : tape `__ghostDebug.realtime()` dans la console.
+   Affiche l'état du Realtime et la raison si désactivé. */
+declare global {
+  interface Window {
+    __ghostDebug?: {
+      realtime: () => {
+        enabled: boolean;
+        url: string;
+        anonKeyPresent: boolean;
+        anonKeyPrefix: string;
+      };
+    };
+  }
+}
+if (typeof window !== "undefined") {
+  window.__ghostDebug = {
+    realtime: () => ({
+      enabled: isRealtimeEnabled(),
+      url,
+      anonKeyPresent: anonKey.length > 0,
+      anonKeyPrefix: anonKey ? `${anonKey.slice(0, 12)}…` : "(missing)",
+    }),
+  };
+}
+
 /* ---------- mappers (snake_case Postgres -> camelCase types) ---------- */
 
 type MessageRow = {
@@ -134,7 +159,14 @@ type SubscribeOptions = {
  *  de désabonnement à appeler dans le cleanup React. */
 export function subscribeBootstrap(opts: SubscribeOptions): () => void {
   const cli = getClient();
-  if (!cli) return () => {};
+  if (!cli) {
+    console.warn(
+      "[ghost/realtime] Realtime désactivé. VITE_SUPABASE_URL ou VITE_SUPABASE_ANON_KEY absents du bundle.",
+      { url, anonKeyPresent: anonKey.length > 0 },
+    );
+    return () => {};
+  }
+  console.log("[ghost/realtime] Subscribing to bootstrap channel…", { url, ownerHash: opts.ownerHash.slice(0, 8) });
 
   const channel: RealtimeChannel = cli
     .channel("ghostinator-bootstrap")
@@ -176,7 +208,19 @@ export function subscribeBootstrap(opts: SubscribeOptions): () => void {
         opts.onGroupMessage(row.group_id, mapGroupMessage(row));
       },
     )
-    .subscribe();
+    .subscribe((status, err) => {
+      console.log("[ghost/realtime] channel status:", status, err || "");
+      if (status === "SUBSCRIBED") {
+        console.log("[ghost/realtime] ✓ abonné aux INSERT messages, posts, conversations, group_messages.");
+      } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+        console.warn(
+          "[ghost/realtime] échec de l'abonnement. Vérifie côté Supabase :\n" +
+            " 1. supabase/schema.sql → policies SELECT publiques sur messages, conversations, group_messages\n" +
+            " 2. ALTER PUBLICATION supabase_realtime ADD TABLE ... (executé)\n" +
+            " 3. Aucun firewall/proxy bloquant les WebSocket vers *.supabase.co",
+        );
+      }
+    });
 
   return () => {
     cli.removeChannel(channel);
