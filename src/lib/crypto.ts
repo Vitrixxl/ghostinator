@@ -1,22 +1,22 @@
 import type { EncryptedPayload, Identity } from "../types";
 
-const identityKey = "ghostinator:identity:v2";
-const aesKeyPrefix = "ghostinator:aes:";
+const IDENTITY_KEY = "ghostinator:identity:v3";
+const GROUP_KEY_PREFIX = "ghostinator:group-key:";
+
+/* ---------- byte helpers ---------- */
 
 function toHex(bytes: Uint8Array) {
-  return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 function bytesToBase64(bytes: Uint8Array) {
   let binary = "";
-  bytes.forEach((byte) => {
-    binary += String.fromCharCode(byte);
-  });
+  for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary);
 }
 
 function base64ToBytes(value: string) {
-  return Uint8Array.from(atob(value), (char) => char.charCodeAt(0));
+  return Uint8Array.from(atob(value), (c) => c.charCodeAt(0));
 }
 
 async function sha256(value: string | Uint8Array) {
@@ -25,66 +25,141 @@ async function sha256(value: string | Uint8Array) {
   return toHex(new Uint8Array(digest));
 }
 
-export async function generateIdentity() {
+export function ensureCrypto() {
+  return Boolean(globalThis.crypto?.subtle);
+}
+
+/* ---------- identity (P-256 ECDH keypair) ---------- */
+
+export async function createIdentity(username: string): Promise<Identity> {
   const keyPair = await crypto.subtle.generateKey(
     { name: "ECDH", namedCurve: "P-256" },
     true,
-    ["deriveKey"],
+    ["deriveKey", "deriveBits"],
   );
   const publicKeyRaw = new Uint8Array(await crypto.subtle.exportKey("raw", keyPair.publicKey));
   const privateJwk = await crypto.subtle.exportKey("jwk", keyPair.privateKey);
   const publicHash = await sha256(publicKeyRaw);
-  const identity: Identity = {
+  return {
+    username,
+    publicHash,
     publicKey: bytesToBase64(publicKeyRaw),
     privateJwk,
-    publicHash,
-    handle: `ghost:${publicHash.slice(0, 8)}`,
-    publicName: `Anonyme ${publicHash.slice(0, 4)}`,
     createdAt: Date.now(),
   };
-  localStorage.setItem(identityKey, JSON.stringify(identity));
-  return identity;
 }
 
-export async function loadIdentity() {
-  const stored = localStorage.getItem(identityKey);
-  if (stored) {
-    const parsed = JSON.parse(stored) as Identity;
-    if (parsed.publicHash && parsed.privateJwk) {
-      const migrated = {
-        ...parsed,
-        publicName: parsed.publicName || `Anonyme ${parsed.publicHash.slice(0, 4)}`,
-      };
-      localStorage.setItem(identityKey, JSON.stringify(migrated));
-      return migrated;
+export function persistIdentity(identity: Identity) {
+  localStorage.setItem(IDENTITY_KEY, JSON.stringify(identity));
+}
+
+export function loadIdentity(): Identity | null {
+  const raw = localStorage.getItem(IDENTITY_KEY);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Identity;
+    if (parsed.username && parsed.publicHash && parsed.privateJwk && parsed.publicKey) {
+      return parsed;
     }
+  } catch {
+    /* fallthrough */
   }
-  return generateIdentity();
+  return null;
 }
 
-export function savePublicName(identity: Identity, publicName: string) {
-  const nextIdentity = { ...identity, publicName };
-  localStorage.setItem(identityKey, JSON.stringify(nextIdentity));
-  return nextIdentity;
+export function clearIdentity() {
+  localStorage.removeItem(IDENTITY_KEY);
 }
 
-export async function generateAesKey() {
-  const key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, [
-    "encrypt",
-    "decrypt",
-  ]);
+/* ---------- ECDH-derived per-peer key ---------- */
+
+async function importPrivateKey(jwk: JsonWebKey) {
+  return crypto.subtle.importKey(
+    "jwk",
+    jwk,
+    { name: "ECDH", namedCurve: "P-256" },
+    false,
+    ["deriveKey", "deriveBits"],
+  );
+}
+
+async function importPeerPublicKey(rawBase64: string) {
+  return crypto.subtle.importKey(
+    "raw",
+    base64ToBytes(rawBase64) as BufferSource,
+    { name: "ECDH", namedCurve: "P-256" },
+    false,
+    [],
+  );
+}
+
+async function derivePeerKey(identity: Identity, peerPublicKey: string) {
+  const priv = await importPrivateKey(identity.privateJwk);
+  const pub = await importPeerPublicKey(peerPublicKey);
+  return crypto.subtle.deriveKey(
+    { name: "ECDH", public: pub },
+    priv,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"],
+  );
+}
+
+export async function encryptForPeer(
+  identity: Identity,
+  peerPublicKey: string,
+  text: string,
+): Promise<EncryptedPayload> {
+  const key = await derivePeerKey(identity, peerPublicKey);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const cipher = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    key,
+    new TextEncoder().encode(text) as BufferSource,
+  );
+  return {
+    iv: bytesToBase64(iv),
+    cipher: bytesToBase64(new Uint8Array(cipher)),
+  };
+}
+
+export async function decryptFromPeer(
+  identity: Identity,
+  peerPublicKey: string,
+  payload: EncryptedPayload,
+): Promise<string> {
+  const key = await derivePeerKey(identity, peerPublicKey);
+  const plain = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: base64ToBytes(payload.iv) as BufferSource },
+    key,
+    base64ToBytes(payload.cipher) as BufferSource,
+  );
+  return new TextDecoder().decode(plain);
+}
+
+/* ---------- group symmetric key (locally stored) ---------- */
+
+export async function generateGroupKey() {
+  const key = await crypto.subtle.generateKey(
+    { name: "AES-GCM", length: 256 },
+    true,
+    ["encrypt", "decrypt"],
+  );
   const raw = new Uint8Array(await crypto.subtle.exportKey("raw", key));
   return bytesToBase64(raw);
 }
 
-async function importAesKey(rawKey: string) {
-  return crypto.subtle.importKey("raw", base64ToBytes(rawKey), { name: "AES-GCM" }, false, [
-    "encrypt",
-    "decrypt",
-  ]);
+async function importAesKey(rawBase64: string) {
+  return crypto.subtle.importKey(
+    "raw",
+    base64ToBytes(rawBase64) as BufferSource,
+    { name: "AES-GCM" },
+    false,
+    ["encrypt", "decrypt"],
+  );
 }
 
-export async function encryptText(rawKey: string, text: string): Promise<EncryptedPayload> {
+export async function encryptWithKey(rawKey: string, text: string): Promise<EncryptedPayload> {
   const key = await importAesKey(rawKey);
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const cipher = await crypto.subtle.encrypt(
@@ -98,24 +173,41 @@ export async function encryptText(rawKey: string, text: string): Promise<Encrypt
   };
 }
 
-export async function decryptText(rawKey: string, payload: EncryptedPayload) {
+export async function decryptWithKey(rawKey: string, payload: EncryptedPayload) {
   const key = await importAesKey(rawKey);
   const plain = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv: base64ToBytes(payload.iv) },
+    { name: "AES-GCM", iv: base64ToBytes(payload.iv) as BufferSource },
     key,
-    base64ToBytes(payload.cipher),
+    base64ToBytes(payload.cipher) as BufferSource,
   );
   return new TextDecoder().decode(plain);
 }
 
-export function saveChannelKey(kind: "dm" | "group", id: string, rawKey: string) {
-  localStorage.setItem(`${aesKeyPrefix}${kind}:${id}`, rawKey);
+export function saveGroupKey(groupId: string, rawKey: string) {
+  localStorage.setItem(`${GROUP_KEY_PREFIX}${groupId}`, rawKey);
 }
 
-export function loadChannelKey(kind: "dm" | "group", id: string) {
-  return localStorage.getItem(`${aesKeyPrefix}${kind}:${id}`);
+export function loadGroupKey(groupId: string) {
+  return localStorage.getItem(`${GROUP_KEY_PREFIX}${groupId}`);
 }
 
-export function ensureCrypto() {
-  return Boolean(window.crypto?.subtle);
+/* ---------- export / display helpers ---------- */
+
+export function identityExport(identity: Identity) {
+  return JSON.stringify(
+    {
+      username: identity.username,
+      publicHash: identity.publicHash,
+      publicKey: identity.publicKey,
+      privateJwk: identity.privateJwk,
+      createdAt: identity.createdAt,
+      v: 3,
+    },
+    null,
+    2,
+  );
+}
+
+export function shortHash(hash: string, size = 6) {
+  return `${hash.slice(0, size)}…${hash.slice(-size)}`;
 }
