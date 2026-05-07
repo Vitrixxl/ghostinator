@@ -3,8 +3,12 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    color-scheme: light;
+  }
+
   html {
-    background: #080c18;
+    background: #ede4d0;
   }
 
   body {
@@ -12,44 +16,294 @@
     min-width: 320px;
     min-height: 100vh;
     overflow-x: hidden;
-    color: #e7e1d1;
-    background:
-      linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(255, 255, 255, 0.022) 1px, transparent 1px),
-      radial-gradient(circle at 50% 0%, rgba(154, 91, 57, 0.16), transparent 28rem),
-      #080c18;
-    background-size: 48px 48px, 48px 48px, auto, auto;
+    color: #181410;
+    font-family: "Newsreader", Georgia, serif;
+    font-size: 17px;
+    line-height: 1.55;
+    background-color: #ede4d0;
+    background-image:
+      radial-gradient(ellipse at 16% 8%, rgba(184, 37, 43, 0.08), transparent 36%),
+      radial-gradient(ellipse at 96% 92%, rgba(31, 53, 82, 0.07), transparent 42%),
+      radial-gradient(circle at 60% 38%, rgba(122, 91, 48, 0.06), transparent 50%);
+    background-attachment: fixed;
+  }
+
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0.55;
+    mix-blend-mode: multiply;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220' viewBox='0 0 220 220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' seed='4'/><feColorMatrix values='0 0 0 0 0.09  0 0 0 0 0.07  0 0 0 0 0.05  0 0 0 0.085 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  }
+
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background-image:
+      linear-gradient(to bottom, rgba(24, 20, 16, 0.05), transparent 240px),
+      linear-gradient(to top, rgba(24, 20, 16, 0.04), transparent 240px);
+  }
+
+  #root {
+    position: relative;
+    z-index: 1;
+  }
+
+  ::selection {
+    background-color: #181410;
+    color: #f5eedb;
   }
 
   button,
   input,
   textarea {
     font: inherit;
+    color: inherit;
+  }
+
+  input,
+  textarea {
+    background: transparent;
+  }
+
+  /* Variable-font tunings */
+  .font-display {
+    font-variation-settings: "opsz" 96, "SOFT" 60, "WONK" 1;
+  }
+
+  .font-serif {
+    font-variation-settings: "opsz" 24;
   }
 }
 
 @layer components {
+  /* Eyebrow / kicker label set in mono caps */
   .kicker {
-    @apply m-0 font-mono text-[12px] font-bold uppercase tracking-[0.22em] text-muted;
+    @apply font-mono text-[10.5px] font-semibold uppercase tracking-ultra text-ash;
   }
 
-  .panel {
-    @apply border border-line bg-panel/80 shadow-panel;
+  .kicker-stamp {
+    @apply font-mono text-[10.5px] font-semibold uppercase tracking-ultra text-stamp;
   }
 
-  .icon-button {
-    @apply grid h-11 w-11 place-items-center rounded-md border border-transparent text-muted transition hover:border-signal/60 hover:bg-signal/10 hover:text-signal;
+  /* Sheet of paper / card */
+  .leaf {
+    background: #f5eedb;
+    border: 1px solid #c9bfa6;
+    box-shadow:
+      0 1px 0 rgba(24, 20, 16, 0.04),
+      0 18px 40px -28px rgba(24, 20, 16, 0.5);
+    position: relative;
+  }
+  .leaf::before {
+    content: "";
+    position: absolute;
+    inset: 6px;
+    pointer-events: none;
+    border: 1px solid rgba(201, 191, 166, 0.55);
   }
 
-  .icon-button.active {
-    @apply border-signal/60 bg-signal/10 text-signal;
+  /* Heavy ruled border like a ledger */
+  .ledger {
+    border-top: 2px solid #181410;
+    border-bottom: 2px solid #181410;
+    position: relative;
+  }
+  .ledger::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 4px;
+    border-top: 1px solid #181410;
+  }
+  .ledger::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 4px;
+    border-bottom: 1px solid #181410;
   }
 
-  .outline-button {
-    @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-signal/60 bg-signal/10 px-4 font-mono text-xs font-extrabold uppercase tracking-[0.08em] text-signal transition hover:bg-signal/20;
+  /* Ornamental rules */
+  .rule-double {
+    border-top: 1px solid #181410;
+    border-bottom: 1px solid #181410;
+    height: 4px;
+  }
+  .rule-thin {
+    border-top: 1px solid #c9bfa6;
   }
 
+  .rule-tick {
+    background-image: repeating-linear-gradient(
+      to right,
+      #181410 0,
+      #181410 1px,
+      transparent 1px,
+      transparent 7px
+    );
+    height: 1px;
+  }
+
+  /* Buttons */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 border border-ink bg-ink px-4 py-2 font-mono text-[11px] font-bold uppercase tracking-widest text-cream transition;
+    box-shadow: 2px 2px 0 #181410;
+  }
+  .btn:hover {
+    transform: translate(-1px, -1px);
+    box-shadow: 3px 3px 0 #181410;
+  }
+  .btn:active {
+    transform: translate(1px, 1px);
+    box-shadow: 1px 1px 0 #181410;
+  }
+  .btn:disabled {
+    opacity: 0.4;
+    pointer-events: none;
+  }
+
+  .btn-stamp {
+    @apply btn;
+    background: #b8252b;
+    color: #f5eedb;
+    border-color: #8e1c20;
+    box-shadow: 2px 2px 0 #8e1c20;
+  }
+  .btn-stamp:hover {
+    box-shadow: 3px 3px 0 #8e1c20;
+  }
+  .btn-stamp:active {
+    box-shadow: 1px 1px 0 #8e1c20;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 border border-ink bg-transparent px-4 py-2 font-mono text-[11px] font-bold uppercase tracking-widest text-ink transition;
+  }
+  .btn-ghost:hover {
+    background: #181410;
+    color: #f5eedb;
+  }
+
+  /* Form inputs */
   .field {
-    @apply w-full rounded-md border border-line bg-white/[0.035] px-4 py-3 text-bone outline-none placeholder:text-muted/70 focus:border-signal/60;
+    @apply w-full border-b-2 border-ink bg-transparent px-0 py-2 font-serif text-lg text-ink outline-none placeholder:text-smoke focus:border-stamp;
+  }
+
+  .field-mono {
+    @apply w-full border border-ink bg-cream px-3 py-2 font-mono text-[13px] text-ink outline-none placeholder:text-smoke focus:border-stamp;
+  }
+
+  .field-block {
+    @apply w-full resize-y border border-ink bg-cream p-4 font-serif text-lg leading-7 text-ink outline-none placeholder:text-smoke focus:border-stamp;
+  }
+
+  /* Stamps and badges */
+  .stamp-badge {
+    @apply inline-flex items-center gap-1.5 border-2 border-stamp bg-stamp/5 px-2 py-1 font-mono text-[9.5px] font-extrabold uppercase tracking-ultra text-stamp;
+    transform: rotate(-1.5deg);
+  }
+
+  .stamp-cipher {
+    @apply inline-flex items-center gap-1.5 border-2 border-cipher bg-cipher/5 px-2 py-1 font-mono text-[9.5px] font-extrabold uppercase tracking-ultra text-cipher;
+  }
+
+  .stamp-classified {
+    @apply inline-flex items-center gap-2 border-[3px] border-stamp px-3 py-1.5 font-mono text-[12px] font-black uppercase tracking-ultra text-stamp;
+    transform: rotate(-7deg);
+  }
+
+  /* Drop cap for posts */
+  .dropcap::first-letter {
+    font-family: "Fraunces", "Newsreader", serif;
+    font-weight: 700;
+    font-size: 4.6rem;
+    line-height: 0.85;
+    float: left;
+    padding: 0.4rem 0.75rem 0 0;
+    color: #b8252b;
+    font-variation-settings: "opsz" 144, "SOFT" 0, "WONK" 1;
+  }
+
+  /* Header masthead lines */
+  .masthead {
+    font-family: "Fraunces", serif;
+    font-variation-settings: "opsz" 144, "SOFT" 0, "WONK" 1;
+    font-weight: 800;
+    letter-spacing: -0.015em;
+    line-height: 0.88;
+  }
+
+  /* Mono dispatch number */
+  .dispatch-no {
+    @apply font-mono text-[10px] font-bold uppercase tracking-ultra text-ash;
+  }
+
+  /* Marginalia notes (italic newsreader) */
+  .marginalia {
+    @apply font-serif text-sm italic text-sepia;
+    font-variation-settings: "opsz" 16;
+  }
+
+  /* Avatar tile */
+  .sigil {
+    @apply grid place-items-center border-2 border-ink bg-cream font-display font-bold text-ink;
+    font-variation-settings: "opsz" 96, "WONK" 1;
+  }
+
+  /* Scrollbars */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #c9bfa6;
+    border: 2px solid #ede4d0;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #8a8175;
+  }
+
+  /* Decorative "fleuron" divider */
+  .fleuron {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    color: #5a5147;
+  }
+  .fleuron::before,
+  .fleuron::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: #c9bfa6;
+  }
+}
+
+@layer utilities {
+  .perforation {
+    background-image: radial-gradient(circle, #ede4d0 3px, transparent 3.5px);
+    background-size: 12px 12px;
+    background-position: 0 50%;
+    background-repeat: repeat-x;
+    height: 12px;
+  }
+  .scribble-underline {
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='100' height='8' viewBox='0 0 100 8'><path d='M1 5 Q 12 1, 25 4 T 50 5 T 75 4 T 99 5' stroke='%23b8252b' stroke-width='2' fill='none'/></svg>");
+    background-repeat: no-repeat;
+    background-size: 100% 8px;
+    background-position: 0 100%;
+    padding-bottom: 6px;
   }
 }
