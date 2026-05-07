@@ -1,0 +1,18 @@
+{
+  "name": "Ghostinator",
+  "short_name": "Ghost",
+  "description": "Réseau social anonyme avec posts publics et conversations chiffrées de bout en bout.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#080c18",
+  "theme_color": "#080c18",
+  "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

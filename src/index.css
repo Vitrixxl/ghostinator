@@ -1,0 +1,55 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    background: #080c18;
+  }
+
+  body {
+    margin: 0;
+    min-width: 320px;
+    min-height: 100vh;
+    overflow-x: hidden;
+    color: #e7e1d1;
+    background:
+      linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.022) 1px, transparent 1px),
+      radial-gradient(circle at 50% 0%, rgba(154, 91, 57, 0.16), transparent 28rem),
+      #080c18;
+    background-size: 48px 48px, 48px 48px, auto, auto;
+  }
+
+  button,
+  input,
+  textarea {
+    font: inherit;
+  }
+}
+
+@layer components {
+  .kicker {
+    @apply m-0 font-mono text-[12px] font-bold uppercase tracking-[0.22em] text-muted;
+  }
+
+  .panel {
+    @apply border border-line bg-panel/80 shadow-panel;
+  }
+
+  .icon-button {
+    @apply grid h-11 w-11 place-items-center rounded-md border border-transparent text-muted transition hover:border-signal/60 hover:bg-signal/10 hover:text-signal;
+  }
+
+  .icon-button.active {
+    @apply border-signal/60 bg-signal/10 text-signal;
+  }
+
+  .outline-button {
+    @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-signal/60 bg-signal/10 px-4 font-mono text-xs font-extrabold uppercase tracking-[0.08em] text-signal transition hover:bg-signal/20;
+  }
+
+  .field {
+    @apply w-full rounded-md border border-line bg-white/[0.035] px-4 py-3 text-bone outline-none placeholder:text-muted/70 focus:border-signal/60;
+  }
+}
