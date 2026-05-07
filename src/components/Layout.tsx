@@ -5,11 +5,11 @@ import { Masthead, Sigil, Spinner, Stamp } from "./ui";
 
 export type View = "feed" | "chat" | "groups" | "dossier";
 
-const NAV: { id: View; label: string; tag: string }[] = [
-  { id: "feed", label: "Feed", tag: "Dispatches publics" },
-  { id: "chat", label: "Chats", tag: "Correspondance privée" },
-  { id: "groups", label: "Groupes", tag: "Cercles fermés" },
-  { id: "dossier", label: "Dossier", tag: "Vos clés" },
+const NAV: { id: View; label: string; tag: string; tagShort: string }[] = [
+  { id: "feed", label: "Feed", tag: "Dispatches publics", tagShort: "Public" },
+  { id: "chat", label: "Chats", tag: "Correspondance privée", tagShort: "Privé" },
+  { id: "groups", label: "Groupes", tag: "Cercles fermés", tagShort: "Cercles" },
+  { id: "dossier", label: "Dossier", tag: "Vos clés", tagShort: "Clés" },
 ];
 
 export function Shell({
@@ -137,24 +137,28 @@ function SideRail({
               Pas encore de pli reçu.
             </li>
           ) : (
-            conversations.slice(0, 4).map((c) => (
-              <li key={c.id}>
-                <button
-                  className="flex w-full items-center gap-3 border border-rule bg-cream px-3 py-2 text-left hover:border-ink"
-                  onClick={() => navigate("chat")}
-                >
-                  <Sigil text={c.peerUsername} size={32} tone="ink" />
-                  <div className="min-w-0">
-                    <p className="truncate font-display text-base font-semibold leading-tight">
-                      @{c.peerUsername}
-                    </p>
-                    <p className="font-mono text-[10.5px] text-ash">
-                      {c.messages.length} blob{c.messages.length === 1 ? "" : "s"}
-                    </p>
-                  </div>
-                </button>
-              </li>
-            ))
+            conversations.slice(0, 4).map((c) => {
+              const isOwner = c.ownerHash === identity.publicHash;
+              const other = isOwner ? c.peerUsername : c.ownerUsername;
+              return (
+                <li key={c.id}>
+                  <button
+                    className="flex w-full items-center gap-3 border border-rule bg-cream px-3 py-2 text-left hover:border-ink"
+                    onClick={() => navigate("chat")}
+                  >
+                    <Sigil text={other} size={32} tone="ink" />
+                    <div className="min-w-0">
+                      <p className="truncate font-display text-base font-semibold leading-tight">
+                        @{other}
+                      </p>
+                      <p className="font-mono text-[10.5px] text-ash">
+                        {c.messages.length} blob{c.messages.length === 1 ? "" : "s"}
+                      </p>
+                    </div>
+                  </button>
+                </li>
+              );
+            })
           )}
         </ul>
       </section>
@@ -185,32 +189,26 @@ function BottomNav({ view, navigate }: { view: View; navigate: (v: View) => void
       className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 border-t-2 border-ink bg-cream/95 backdrop-blur lg:hidden"
       style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
     >
-      {NAV.map((item, idx) => {
+      {NAV.map((item) => {
         const active = view === item.id;
-        const dispatchNo = String(idx + 1).padStart(2, "0");
         return (
           <button
             key={item.id}
             aria-label={`${item.label} — ${item.tag}`}
-            className={`group relative flex flex-col items-center justify-center gap-0.5 border-r border-rule py-2 last:border-r-0 transition ${
+            className={`relative flex flex-col items-center justify-center gap-0.5 overflow-hidden border-r border-rule px-1 py-2 last:border-r-0 transition ${
               active ? "bg-ink text-cream" : "text-ink"
             }`}
             onClick={() => navigate(item.id)}
           >
-            <span
-              className={`absolute left-1.5 top-1 font-mono text-[8px] tracking-ultra ${
-                active ? "text-cream/70" : "text-ash"
-              }`}
-            >
-              N°{dispatchNo}
+            <span className="truncate font-display text-[14px] font-bold leading-none">
+              {item.label}
             </span>
-            <span className="font-display text-[15px] font-bold leading-none">{item.label}</span>
             <span
-              className={`font-mono text-[8.5px] uppercase tracking-ultra ${
+              className={`truncate font-mono text-[8.5px] uppercase tracking-widest ${
                 active ? "text-cream/80" : "text-ash"
               }`}
             >
-              {item.tag.split(" ")[0]}
+              {item.tagShort}
             </span>
           </button>
         );

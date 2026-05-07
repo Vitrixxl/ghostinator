@@ -22,6 +22,7 @@ import { isRealtimeEnabled, subscribeBootstrap } from "./lib/realtime";
 import type {
   Conversation,
   Group,
+  GroupMessage,
   Health,
   Identity,
   Message,
@@ -162,6 +163,17 @@ export default function App() {
           items.find((c) => c.id === conv.id) ? items : [conv, ...items],
         );
       },
+      onGroupMessage: (groupId, message) => {
+        setGroups((items) =>
+          items.map((g) =>
+            g.id === groupId
+              ? g.messages.find((m) => m.id === message.id)
+                ? g
+                : { ...g, messages: [...g.messages, message] }
+              : g,
+          ),
+        );
+      },
     });
     return () => unsubscribe();
     // On ré-abonne quand la liste de conversations change pour rafraîchir le filtre INSERT messages.
@@ -177,6 +189,8 @@ export default function App() {
     if (!identity) return;
     const conversation = await api.createConversation({
       ownerHash: identity.publicHash,
+      ownerUsername: identity.username,
+      ownerPublicKeyX25519: identity.publicKeyX25519,
       peerHash: user.publicHash,
       peerUsername: user.username,
       peerPublicKeyX25519: user.publicKeyX25519,
@@ -284,6 +298,17 @@ export default function App() {
           identity={identity}
           groups={groups}
           onCreate={(group: Group) => setGroups((items) => [group, ...items])}
+          onGroupMessage={(groupId: string, message: GroupMessage) =>
+            setGroups((items) =>
+              items.map((g) =>
+                g.id === groupId
+                  ? g.messages.find((m) => m.id === message.id)
+                    ? g
+                    : { ...g, messages: [...g.messages, message] }
+                  : g,
+              ),
+            )
+          }
         />
       ) : null}
       {view === "dossier" ? <Dossier identity={identity} onLogout={logout} /> : null}

@@ -292,6 +292,8 @@ function mapConversation(row, messagesByConversation) {
   return {
     id: row.id,
     ownerHash: row.owner_hash,
+    ownerUsername: row.owner_username,
+    ownerPublicKeyX25519: row.owner_public_key_x25519,
     peerHash: row.peer_hash,
     peerUsername: row.peer_username,
     peerPublicKeyX25519: row.peer_public_key_x25519,
@@ -300,7 +302,7 @@ function mapConversation(row, messagesByConversation) {
   };
 }
 
-function mapGroup(row) {
+function mapGroup(row, messagesByGroup) {
   return {
     id: row.id,
     ownerHash: row.owner_hash,
@@ -309,6 +311,18 @@ function mapGroup(row) {
     topic: row.topic,
     encryptedIntro: { iv: row.intro_iv, cipher: row.intro_cipher },
     memberCount: row.member_count,
+    createdAt: row.created_at,
+    messages: messagesByGroup?.get(row.id) || [],
+  };
+}
+
+function mapGroupMessage(row) {
+  return {
+    id: row.id,
+    groupId: row.group_id,
+    authorHash: row.author_hash,
+    authorUsername: row.author_username,
+    encrypted: { iv: row.iv, cipher: row.cipher },
     createdAt: row.created_at,
   };
 }
@@ -384,7 +398,7 @@ async function getUserByHash(env, hash) {
 
 async function bootstrap(env, ownerHash) {
   const filter = ownerHash ? `or=(owner_hash.eq.${ownerHash},peer_hash.eq.${ownerHash})` : "limit=0";
-  const [posts, conversations, messages, groups] = await Promise.all([
+  const [posts, conversations, messages, groups, groupMessages] = await Promise.all([
     supabaseRequest(env, "posts?select=*&order=created_at.desc&limit=80"),
     ownerHash
       ? supabaseRequest(env, `conversations?${filter}&select=*&order=created_at.desc&limit=80`)
@@ -393,6 +407,7 @@ async function bootstrap(env, ownerHash) {
       ? supabaseRequest(env, `messages?select=*&order=created_at.asc&limit=600`)
       : Promise.resolve([]),
     supabaseRequest(env, "groups?select=*&order=created_at.desc&limit=80"),
+    supabaseRequest(env, "group_messages?select=*&order=created_at.asc&limit=600"),
   ]);
 
   const conversationIds = new Set(conversations.map((row) => row.id));
@@ -404,10 +419,17 @@ async function bootstrap(env, ownerHash) {
     messagesByConversation.set(row.conversation_id, list);
   });
 
+  const messagesByGroup = new Map();
+  groupMessages.forEach((row) => {
+    const list = messagesByGroup.get(row.group_id) || [];
+    list.push(mapGroupMessage(row));
+    messagesByGroup.set(row.group_id, list);
+  });
+
   return {
     posts: posts.map(mapPost),
     conversations: conversations.map((row) => mapConversation(row, messagesByConversation)),
-    groups: groups.map(mapGroup),
+    groups: groups.map((row) => mapGroup(row, messagesByGroup)),
   };
 }
 
@@ -439,6 +461,8 @@ async function createConversation(env, body) {
     method: "POST",
     body: JSON.stringify({
       owner_hash: ownerHash,
+      owner_username: requireUsername(body.ownerUsername),
+      owner_public_key_x25519: requireString(body.ownerPublicKeyX25519, "ownerPublicKeyX25519", 256),
       peer_hash: peerHash,
       peer_username: requireUsername(body.peerUsername),
       peer_public_key_x25519: requireString(body.peerPublicKeyX25519, "peerPublicKeyX25519", 256),
@@ -475,7 +499,22 @@ async function createGroup(env, body) {
       intro_cipher: encryptedIntro.cipher,
     }),
   });
-  return mapGroup(rows[0]);
+  return mapGroup(rows[0], new Map());
+}
+
+async function createGroupMessage(env, groupId, body) {
+  const encrypted = encryptedPayload(body.encrypted);
+  const rows = await supabaseRequest(env, "group_messages", {
+    method: "POST",
+    body: JSON.stringify({
+      group_id: groupId,
+      author_hash: requireHash(body.authorHash, "authorHash"),
+      author_username: requireUsername(body.authorUsername),
+      iv: encrypted.iv,
+      cipher: encrypted.cipher,
+    }),
+  });
+  return mapGroupMessage(rows[0]);
 }
 
 async function requestJson(request) {
@@ -630,6 +669,13 @@ export default {
       if (method === "POST" && url.pathname === "/api/groups") {
         await authBy("ownerHash");
         const created = await createGroup(env, body);
+        return json(created, 201, origin);
+      }
+
+      const groupMessageMatch = url.pathname.match(/^\/api\/groups\/([^/]+)\/messages$/);
+      if (method === "POST" && groupMessageMatch) {
+        await authBy("authorHash");
+        const created = await createGroupMessage(env, groupMessageMatch[1], body);
         return json(created, 201, origin);
       }
 

@@ -10,7 +10,7 @@ import {
   type RealtimeChannel,
   type SupabaseClient,
 } from "@supabase/supabase-js";
-import type { Conversation, Message, Post } from "../types";
+import type { Conversation, GroupMessage, Message, Post } from "../types";
 
 const url = (import.meta.env.VITE_SUPABASE_URL as string | undefined) || "";
 const anonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) || "";
@@ -53,9 +53,21 @@ type PostRow = {
   created_at: string;
 };
 
+type GroupMessageRow = {
+  id: string;
+  group_id: string;
+  author_hash: string;
+  author_username: string;
+  iv: string;
+  cipher: string;
+  created_at: string;
+};
+
 type ConversationRow = {
   id: string;
   owner_hash: string;
+  owner_username: string;
+  owner_public_key_x25519: string;
   peer_hash: string;
   peer_username: string;
   peer_public_key_x25519: string;
@@ -87,11 +99,24 @@ function mapConversation(row: ConversationRow): Conversation {
   return {
     id: row.id,
     ownerHash: row.owner_hash,
+    ownerUsername: row.owner_username,
+    ownerPublicKeyX25519: row.owner_public_key_x25519,
     peerHash: row.peer_hash,
     peerUsername: row.peer_username,
     peerPublicKeyX25519: row.peer_public_key_x25519,
     createdAt: row.created_at,
     messages: [],
+  };
+}
+
+function mapGroupMessage(row: GroupMessageRow): GroupMessage {
+  return {
+    id: row.id,
+    groupId: row.group_id,
+    authorHash: row.author_hash,
+    authorUsername: row.author_username,
+    encrypted: { iv: row.iv, cipher: row.cipher },
+    createdAt: row.created_at,
   };
 }
 
@@ -102,6 +127,7 @@ type SubscribeOptions = {
   onPost: (post: Post) => void;
   onMessage: (conversationId: string, message: Message) => void;
   onConversation: (conversation: Conversation) => void;
+  onGroupMessage: (groupId: string, message: GroupMessage) => void;
 };
 
 /** S'abonne aux INSERT sur messages, posts, conversations. Renvoie une fonction
@@ -140,6 +166,14 @@ export function subscribeBootstrap(opts: SubscribeOptions): () => void {
           return;
         }
         opts.onConversation(mapConversation(row));
+      },
+    )
+    .on(
+      "postgres_changes",
+      { event: "INSERT", schema: "public", table: "group_messages" },
+      (payload) => {
+        const row = payload.new as GroupMessageRow;
+        opts.onGroupMessage(row.group_id, mapGroupMessage(row));
       },
     )
     .subscribe();

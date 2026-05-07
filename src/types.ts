@@ -45,11 +45,22 @@ export type Message = {
 export type Conversation = {
   id: string;
   ownerHash: string;
+  ownerUsername: string;
+  ownerPublicKeyX25519: string;
   peerHash: string;
   peerUsername: string;
   peerPublicKeyX25519: string;
   createdAt: string;
   messages: Message[];
+};
+
+export type GroupMessage = {
+  id: string;
+  groupId: string;
+  authorHash: string;
+  authorUsername: string;
+  encrypted: EncryptedPayload;
+  createdAt: string;
 };
 
 export type Group = {
@@ -61,6 +72,7 @@ export type Group = {
   encryptedIntro: EncryptedPayload;
   memberCount: number;
   createdAt: string;
+  messages: GroupMessage[];
 };
 
 export type Bootstrap = {

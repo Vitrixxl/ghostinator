@@ -46,12 +46,20 @@ create table if not exists public.posts (
 create table if not exists public.conversations (
   id uuid primary key default gen_random_uuid(),
   owner_hash text not null check (char_length(owner_hash) = 64),
+  owner_username citext not null,
+  owner_public_key_x25519 text not null check (char_length(owner_public_key_x25519) <= 256),
   peer_hash text not null check (char_length(peer_hash) = 64),
   peer_username citext not null,
   peer_public_key_x25519 text not null check (char_length(peer_public_key_x25519) <= 256),
   created_at timestamptz not null default now(),
   unique (owner_hash, peer_hash)
 );
+
+-- Migration : ajouter owner_username + owner_public_key_x25519 sur les bases existantes.
+alter table public.conversations
+  add column if not exists owner_username citext;
+alter table public.conversations
+  add column if not exists owner_public_key_x25519 text;
 
 -- Migration conversations : renomme peer_public_key -> peer_public_key_x25519 si besoin
 do $$
@@ -91,6 +99,16 @@ create table if not exists public.groups (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.group_messages (
+  id uuid primary key default gen_random_uuid(),
+  group_id uuid not null references public.groups(id) on delete cascade,
+  author_hash text not null check (char_length(author_hash) = 64),
+  author_username citext not null,
+  iv text not null check (char_length(iv) <= 200),
+  cipher text not null check (char_length(cipher) <= 10000),
+  created_at timestamptz not null default now()
+);
+
 create index if not exists users_username_idx on public.users (username);
 create index if not exists users_public_hash_idx on public.users (public_hash);
 create index if not exists posts_created_at_idx on public.posts (created_at desc);
@@ -100,12 +118,14 @@ create index if not exists conversations_peer_hash_idx on public.conversations (
 create index if not exists conversations_created_at_idx on public.conversations (created_at desc);
 create index if not exists messages_conversation_id_created_at_idx on public.messages (conversation_id, created_at asc);
 create index if not exists groups_created_at_idx on public.groups (created_at desc);
+create index if not exists group_messages_group_id_created_at_idx on public.group_messages (group_id, created_at asc);
 
 alter table public.users enable row level security;
 alter table public.posts enable row level security;
 alter table public.conversations enable row level security;
 alter table public.messages enable row level security;
 alter table public.groups enable row level security;
+alter table public.group_messages enable row level security;
 
 drop policy if exists "public can read users directory" on public.users;
 create policy "public can read users directory"
@@ -137,6 +157,11 @@ create policy "public can read conversations metadata"
   on public.conversations for select
   using (true);
 
+drop policy if exists "public can read group messages metadata" on public.group_messages;
+create policy "public can read group messages metadata"
+  on public.group_messages for select
+  using (true);
+
 -- Activer Realtime (publication logique) sur les tables où le push est utile.
 -- idempotent : ne ré-ajoute pas si déjà présent.
 do $$
@@ -158,5 +183,11 @@ begin
     where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'conversations'
   ) then
     alter publication supabase_realtime add table public.conversations;
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'group_messages'
+  ) then
+    alter publication supabase_realtime add table public.group_messages;
   end if;
 end$$;

@@ -284,6 +284,8 @@ function readDb() {
   if (!Array.isArray(db.posts)) db.posts = [];
   if (!Array.isArray(db.conversations)) db.conversations = [];
   if (!Array.isArray(db.groups)) db.groups = [];
+  // Migration douce : s'assurer que chaque group a un tableau messages.
+  db.groups = db.groups.map((g) => (Array.isArray(g.messages) ? g : { ...g, messages: [] }));
   return db;
 }
 
@@ -355,9 +357,14 @@ const jsonRepo = {
     if (existing) return existing;
     const conversation = {
       id: id("dm"),
+      ownerHash: input.ownerHash,
+      ownerUsername: input.ownerUsername,
+      ownerPublicKeyX25519: input.ownerPublicKeyX25519,
+      peerHash: input.peerHash,
+      peerUsername: input.peerUsername,
+      peerPublicKeyX25519: input.peerPublicKeyX25519,
       createdAt: now(),
       messages: [],
-      ...input,
     };
     db.conversations.unshift(conversation);
     writeDb(db);
@@ -374,10 +381,31 @@ const jsonRepo = {
   },
   async createGroup(input) {
     const db = readDb();
-    const group = { id: id("grp"), memberCount: 1, createdAt: now(), ...input };
+    const group = {
+      id: id("grp"),
+      memberCount: 1,
+      createdAt: now(),
+      messages: [],
+      ...input,
+    };
     db.groups.unshift(group);
     writeDb(db);
     return group;
+  },
+  async createGroupMessage(groupId, input) {
+    const db = readDb();
+    const group = db.groups.find((g) => g.id === groupId);
+    if (!group) return null;
+    const message = {
+      id: id("gmsg"),
+      groupId,
+      createdAt: now(),
+      ...input,
+    };
+    group.messages = group.messages || [];
+    group.messages.push(message);
+    writeDb(db);
+    return message;
   },
 };
 
@@ -417,6 +445,8 @@ function mapConversation(row) {
   return {
     id: row.id,
     ownerHash: row.owner_hash,
+    ownerUsername: row.owner_username,
+    ownerPublicKeyX25519: row.owner_public_key_x25519,
     peerHash: row.peer_hash,
     peerUsername: row.peer_username,
     peerPublicKeyX25519: row.peer_public_key_x25519,
@@ -434,6 +464,18 @@ function mapGroup(row) {
     topic: row.topic,
     encryptedIntro: { iv: row.intro_iv, cipher: row.intro_cipher },
     memberCount: row.member_count,
+    createdAt: row.created_at,
+    messages: (row.group_messages || []).map(mapGroupMessage),
+  };
+}
+
+function mapGroupMessage(row) {
+  return {
+    id: row.id,
+    groupId: row.group_id,
+    authorHash: row.author_hash,
+    authorUsername: row.author_username,
+    encrypted: { iv: row.iv, cipher: row.cipher },
     createdAt: row.created_at,
   };
 }
@@ -491,7 +533,11 @@ const supabaseRepo = {
   async bootstrap(ownerHash) {
     const [posts, groups, conversations] = await Promise.all([
       supabase.from("posts").select("*").order("created_at", { ascending: false }).limit(80),
-      supabase.from("groups").select("*").order("created_at", { ascending: false }).limit(80),
+      supabase
+        .from("groups")
+        .select("*, group_messages(*)")
+        .order("created_at", { ascending: false })
+        .limit(80),
       ownerHash
         ? supabase
             .from("conversations")
@@ -537,6 +583,8 @@ const supabaseRepo = {
       .from("conversations")
       .insert({
         owner_hash: input.ownerHash,
+        owner_username: input.ownerUsername,
+        owner_public_key_x25519: input.ownerPublicKeyX25519,
         peer_hash: input.peerHash,
         peer_username: input.peerUsername,
         peer_public_key_x25519: input.peerPublicKeyX25519,
@@ -575,7 +623,22 @@ const supabaseRepo = {
       .select("*")
       .single();
     if (error) throw error;
-    return mapGroup(data);
+    return mapGroup({ ...data, group_messages: [] });
+  },
+  async createGroupMessage(groupId, input) {
+    const { data, error } = await supabase
+      .from("group_messages")
+      .insert({
+        group_id: groupId,
+        author_hash: input.authorHash,
+        author_username: input.authorUsername,
+        iv: input.encrypted.iv,
+        cipher: input.encrypted.cipher,
+      })
+      .select("*")
+      .single();
+    if (error) throw error;
+    return mapGroupMessage(data);
   },
 };
 
@@ -705,6 +768,12 @@ app.post("/api/conversations", async (req, res, next) => {
     await authBy({ req, authorHashField: "ownerHash" });
     const conversation = await repo.createConversation({
       ownerHash: requireHash(req.body.ownerHash, "ownerHash"),
+      ownerUsername: requireUsername(req.body.ownerUsername),
+      ownerPublicKeyX25519: requireString(
+        req.body.ownerPublicKeyX25519,
+        "ownerPublicKeyX25519",
+        256,
+      ),
       peerHash: requireHash(req.body.peerHash, "peerHash"),
       peerUsername: requireUsername(req.body.peerUsername),
       peerPublicKeyX25519: requireString(
@@ -745,6 +814,21 @@ app.post("/api/groups", async (req, res, next) => {
       encryptedIntro: encryptedPayload(req.body.encryptedIntro),
     });
     res.status(201).json(group);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/groups/:id/messages", async (req, res, next) => {
+  try {
+    await authBy({ req, authorHashField: "authorHash" });
+    const message = await repo.createGroupMessage(req.params.id, {
+      authorHash: requireHash(req.body.authorHash, "authorHash"),
+      authorUsername: requireUsername(req.body.authorUsername),
+      encrypted: encryptedPayload(req.body.encrypted),
+    });
+    if (!message) return res.status(404).json({ error: "Cercle introuvable" });
+    res.status(201).json(message);
   } catch (error) {
     next(error);
   }

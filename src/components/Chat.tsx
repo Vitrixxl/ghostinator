@@ -112,6 +112,8 @@ function ConversationList({
           conversations.map((c) => {
             const isActive = c.id === activeId;
             const last = c.messages[c.messages.length - 1];
+            const isOwner = c.ownerHash === identity.publicHash;
+            const otherUsername = isOwner ? c.peerUsername : c.ownerUsername;
             return (
               <li key={c.id}>
                 <button
@@ -123,13 +125,13 @@ function ConversationList({
                   }`}
                 >
                   <Sigil
-                    text={c.peerUsername}
+                    text={otherUsername}
                     size={36}
                     tone={isActive ? "stamp" : "ink"}
                   />
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-display text-base font-semibold leading-tight">
-                      @{c.peerUsername}
+                      @{otherUsername}
                     </p>
                     <p className="truncate font-mono text-[10.5px] text-ash">
                       {last
@@ -165,16 +167,23 @@ function Thread({
   const [decrypted, setDecrypted] = useState<Record<string, string | null>>({});
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  /* Selon que l'utilisateur courant est ownerHash ou peerHash de la conversation,
+     la pubkey X25519 du *vrai* peer (l'autre) n'est pas la même colonne en BDD.
+     ECDH(myPriv, otherPub) doit donner la même clé partagée des deux côtés. */
+  const isOwner = conversation.ownerHash === identity.publicHash;
+  const otherPubKeyX25519 = isOwner
+    ? conversation.peerPublicKeyX25519
+    : conversation.ownerPublicKeyX25519;
+  const otherUsername = isOwner ? conversation.peerUsername : conversation.ownerUsername;
+  const otherHash = isOwner ? conversation.peerHash : conversation.ownerHash;
+
   useEffect(() => {
     let cancelled = false;
     async function decryptAll() {
       const out: Record<string, string | null> = {};
       for (const message of conversation.messages) {
         try {
-          out[message.id] = await decryptFromPeer(
-            conversation.peerPublicKeyX25519,
-            message.encrypted,
-          );
+          out[message.id] = await decryptFromPeer(otherPubKeyX25519, message.encrypted);
         } catch {
           out[message.id] = null;
         }
@@ -185,7 +194,7 @@ function Thread({
     return () => {
       cancelled = true;
     };
-  }, [conversation, identity]);
+  }, [conversation, identity, otherPubKeyX25519]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -199,7 +208,7 @@ function Thread({
     setSending(true);
     setError(null);
     try {
-      const encrypted = await encryptForPeer(conversation.peerPublicKeyX25519, draft.trim());
+      const encrypted = await encryptForPeer(otherPubKeyX25519, draft.trim());
       const message = await api.createMessage(conversation.id, {
         authorHash: identity.publicHash,
         authorUsername: identity.username,
@@ -226,15 +235,15 @@ function Thread({
           ←
         </button>
         <div className="flex min-w-0 items-center gap-2 sm:gap-3">
-          <Sigil text={conversation.peerUsername} size={40} tone="cipher" />
+          <Sigil text={otherUsername} size={40} tone="cipher" />
           <div className="min-w-0">
             <p className="kicker">Privé</p>
             <h2 className="truncate font-display text-xl font-bold leading-none sm:text-2xl md:text-3xl">
               <span className="text-stamp">@</span>
-              {conversation.peerUsername}
+              {otherUsername}
             </h2>
             <p className="mt-1 truncate font-mono text-[10.5px] text-ash">
-              clé peer {shortHash(conversation.peerHash, 6)}
+              clé peer {shortHash(otherHash, 6)}
             </p>
           </div>
         </div>

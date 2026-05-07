@@ -3,6 +3,7 @@ import type {
   Conversation,
   EncryptedPayload,
   Group,
+  GroupMessage,
   Health,
   Message,
   Post,
@@ -112,6 +113,8 @@ export function createPost(input: {
 
 export function createConversation(input: {
   ownerHash: string;
+  ownerUsername: string;
+  ownerPublicKeyX25519: string;
   peerHash: string;
   peerUsername: string;
   peerPublicKeyX25519: string;
@@ -142,6 +145,17 @@ export function createGroup(input: {
   encryptedIntro: EncryptedPayload;
 }) {
   return request<Group>("/api/groups", {
+    method: "POST",
+    body: input,
+    sign: true,
+  });
+}
+
+export function createGroupMessage(
+  groupId: string,
+  input: { authorHash: string; authorUsername: string; encrypted: EncryptedPayload },
+) {
+  return request<GroupMessage>(`/api/groups/${groupId}/messages`, {
     method: "POST",
     body: input,
     sign: true,

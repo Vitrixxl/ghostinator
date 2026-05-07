@@ -239,6 +239,8 @@ describe("Story critique : signup + DM E2EE entre Alice et Bob", () => {
       path: "/api/conversations",
       body: {
         ownerHash: alice.publicHash,
+        ownerUsername: alice.username,
+        ownerPublicKeyX25519: alice.publicKeyX25519,
         peerHash: bob.publicHash,
         peerUsername: bob.username,
         peerPublicKeyX25519: bob.publicKeyX25519,
@@ -246,6 +248,7 @@ describe("Story critique : signup + DM E2EE entre Alice et Bob", () => {
       edPriv: alice.edPriv,
     });
     expect(conversation.peerPublicKeyX25519).toBe(bob.publicKeyX25519);
+    expect(conversation.ownerPublicKeyX25519).toBe(alice.publicKeyX25519);
 
     // 4. Alice chiffre "Le bureau est ouvert." pour Bob via X25519 ECDH
     const aliceShared = await deriveSharedAesKey(alice.xPriv, bob.publicKeyX25519);
