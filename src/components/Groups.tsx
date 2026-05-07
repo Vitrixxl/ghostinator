@@ -113,7 +113,7 @@ function CreateModal({
         topic: topic.trim().slice(0, 180),
         encryptedIntro,
       });
-      saveGroupKey(group.id, key);
+      await saveGroupKey(group.id, key);
       setCreated({ group, key });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erreur");
