@@ -41,6 +41,16 @@
 
 ---
 
+## Tension 5 : Anonymat strict et UX temps réel
+
+- **Citation du brief :** « *Notre architecture présentée la semaine dernière était censée intégrer cette contrainte.* » (§4.3.3) — appliqué ici au principe « *jamais de métadonnée corrélable côté serveur* ». Et le brief §1.5 : « *anonymisation totale* ».
+- **Pourquoi c'est une tension :** pour pousser des messages en temps réel via WebSocket sans interroger périodiquement le serveur, les clients doivent s'abonner directement à Supabase Realtime. Cela exige une policy `SELECT` publique sur les tables `messages` et `conversations` — ce qui révèle de la métadonnée (`author_hash`, `conversation_id`, `created_at`, taille du `cipher`). Le contenu reste E2EE (X25519+AES-GCM, illisible sans la clé privée), mais la métadonnée fuit. Le pur respect de la contrainte « anonymisation totale » impliquerait soit pas de temps réel, soit du polling court, soit un proxy WebSocket via Worker (nécessite Durable Objects, payants — contradiction avec ADR-0001).
+- **Notre arbitrage :** nous activons Realtime sur `messages`, `conversations`, `posts` avec `SELECT` publique. Justification : (a) le contenu reste chiffré E2EE, (b) `/api/bootstrap` du Worker accepte déjà n'importe quel hash sans signature, donc la métadonnée est *déjà* exposée — Realtime ne dégrade pas la posture, (c) l'expérience utilisateur d'un réseau social sans temps réel est inacceptable, (d) le client Supabase utilisé est `anon` (jamais le `service_role`), donc pas d'écriture possible. Dette : remplacer en M+1 par un endpoint signé Ed25519 + Realtime Authorization Policies basées sur JWT (Supabase 2024+) pour scoper l'abonnement aux conversations dont la signature prouve l'appartenance. Documenté dans `docs/plan.md` §M+1.
+
+## Note opérationnelle : session locale courte
+
+Au-delà des tensions du brief, une décision UX assumée : la PWA garde le mot de passe local en `sessionStorage` pendant 1 h après chaque saisie (sliding window). Permet un rechargement de page sans re-saisie. `sessionStorage` est par-onglet (pas de fuite cross-tab), même surface d'attaque que la clé privée déjà en mémoire JS. Forfait acceptable pour un MVP. Effacé sur logout explicite et automatiquement à la fermeture du navigateur.
+
 ## Ce que nous n'avons pas traité comme tension
 
 - « Latence ultra-faible mondiale » — n'est pas dans nos contraintes (groupe 8), donc pas un sujet pour nous.
