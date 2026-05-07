@@ -73,28 +73,28 @@ export function Onboarding({ onReady }: { onReady: (identity: Identity) => Promi
     <div className="relative min-h-screen overflow-hidden">
       <DecorativeRules />
 
-      <div className="relative mx-auto grid min-h-screen w-full max-w-[1180px] grid-rows-[auto_1fr_auto] px-6 py-8 md:px-10">
-        <header className="animate-fade-in border-b-[3px] border-double border-ink pb-5">
-          <div className="flex flex-wrap items-end justify-between gap-3">
-            <div>
-              <p className="kicker">Bureau privé · Édition matinale · Vol. I</p>
+      <div className="relative mx-auto grid min-h-screen w-full max-w-[1180px] grid-rows-[auto_1fr_auto] px-4 py-6 sm:px-6 sm:py-8 md:px-10">
+        <header className="animate-fade-in border-b-[3px] border-double border-ink pb-4 sm:pb-5">
+          <div className="flex flex-wrap items-end justify-between gap-2 sm:gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="kicker">Bureau privé · Vol. I</p>
               <Masthead size="xl" />
             </div>
-            <div className="text-right font-mono text-[11px] uppercase tracking-ultra text-ash">
-              <p>Édition №001</p>
+            <div className="shrink-0 text-right font-mono text-[10px] uppercase tracking-ultra text-ash sm:text-[11px]">
+              <p>Éd. №001</p>
               <p>Anno {new Date().getFullYear()}</p>
               <p className="text-stamp">Confidentiel</p>
             </div>
           </div>
-          <p className="mt-2 font-serif italic text-graphite">
+          <p className="mt-2 font-serif italic text-sm text-graphite sm:text-base">
             « Réseau de correspondance chiffrée — clés générées localement, jamais transmises. »
           </p>
         </header>
 
-        <main className="grid grid-cols-1 gap-10 py-12 md:grid-cols-[1.2fr_1fr]">
+        <main className="grid grid-cols-1 gap-8 py-8 sm:gap-10 sm:py-10 md:grid-cols-[1.2fr_1fr] md:py-12">
           <section className="animate-rise-in" style={{ animationDelay: "120ms" }}>
             <Stamp tone="stamp" rotate={-3}>Étape {stage === "alias" || stage === "minting" ? "1" : "2"} / 2</Stamp>
-            <h2 className="masthead mt-5 text-5xl md:text-6xl">
+            <h2 className="masthead mt-4 text-3xl sm:mt-5 sm:text-4xl md:text-5xl xl:text-6xl">
               {stage === "dossier"
                 ? "Votre dossier vient d'être ouvert"
                 : "Forger une identité anonyme"}
@@ -106,7 +106,7 @@ export function Onboarding({ onReady }: { onReady: (identity: Identity) => Promi
             </p>
 
             {stage !== "dossier" ? (
-              <form onSubmit={startMint} className="mt-10 max-w-md">
+              <form onSubmit={startMint} className="mt-6 max-w-md sm:mt-10">
                 <div>
                   <label className="kicker mb-1 block">Alias public</label>
                   <input
@@ -206,7 +206,7 @@ export function Onboarding({ onReady }: { onReady: (identity: Identity) => Promi
           </section>
 
           <aside
-            className="space-y-6 border-l border-rule pl-6 md:pl-10 animate-rise-in"
+            className="space-y-5 animate-rise-in border-t border-rule pt-6 sm:space-y-6 md:border-l md:border-t-0 md:pl-6 md:pt-0 lg:pl-10"
             style={{ animationDelay: "240ms" }}
           >
             <Pillar
@@ -250,8 +250,10 @@ function Pillar({ n, title, copy }: { n: string; title: string; copy: string }) 
   return (
     <article>
       <div className="flex items-baseline gap-3">
-        <span className="font-display text-3xl italic text-stamp">{n}</span>
-        <h3 className="font-display text-2xl font-semibold leading-tight text-ink">{title}</h3>
+        <span className="font-display text-2xl italic text-stamp sm:text-3xl">{n}</span>
+        <h3 className="font-display text-xl font-semibold leading-tight text-ink sm:text-2xl">
+          {title}
+        </h3>
       </div>
       <p className="marginalia mt-2">{copy}</p>
     </article>
@@ -275,24 +277,28 @@ function Dossier({
 }) {
   const exportJson = identityExport(identity);
   return (
-    <div className="relative mt-8 max-w-2xl">
-      <div className="absolute -right-4 -top-4 z-10 animate-stamp">
+    <div className="relative mt-6 max-w-2xl sm:mt-8">
+      <div className="absolute -right-2 -top-2 z-10 animate-stamp sm:-right-4 sm:-top-4">
         <span className="stamp-classified">Confidentiel</span>
       </div>
 
-      <div className="leaf p-6">
-        <header className="flex items-center justify-between gap-4 border-b border-rule pb-4">
-          <div className="flex items-center gap-3">
-            <Sigil text={identity.username} size={56} tone="stamp" />
-            <div>
+      <div className="leaf p-4 sm:p-6">
+        <header className="flex items-start justify-between gap-3 border-b border-rule pb-3 sm:items-center sm:gap-4 sm:pb-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <Sigil text={identity.username} size={48} tone="stamp" />
+            <div className="min-w-0">
               <p className="kicker">Alias enregistré</p>
-              <p className="font-display text-3xl font-bold leading-none">@{identity.username}</p>
-              <p className="mt-1 font-mono text-[11px] text-ash">
+              <p className="truncate font-display text-2xl font-bold leading-none sm:text-3xl">
+                @{identity.username}
+              </p>
+              <p className="mt-1 truncate font-mono text-[11px] text-ash">
                 Empreinte {shortHash(identity.publicHash, 8)}
               </p>
             </div>
           </div>
-          <Stamp tone="cipher" rotate={4}>Ed25519 + X25519</Stamp>
+          <span className="hidden shrink-0 sm:inline-flex">
+            <Stamp tone="cipher" rotate={4}>Ed25519 + X25519</Stamp>
+          </span>
         </header>
 
         <div className="mt-5 space-y-4">

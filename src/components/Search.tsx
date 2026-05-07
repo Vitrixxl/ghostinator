@@ -7,9 +7,13 @@ import { Sigil, Stamp } from "./ui";
 export function SearchPanel({
   identity,
   onOpen,
+  compact = false,
 }: {
   identity: Identity;
   onOpen: (user: User) => void | Promise<void>;
+  /** Quand true (utilisé dans SearchModal), masque le header et la note décorative
+      pour éviter une double titraille. */
+  compact?: boolean;
 }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<User[]>([]);
@@ -56,13 +60,17 @@ export function SearchPanel({
 
   return (
     <section>
-      <header className="border-b-[3px] border-double border-ink pb-2">
-        <p className="kicker">Directoire</p>
-        <h3 className="masthead text-3xl">Trouver un agent</h3>
-        <p className="marginalia mt-1">Cherchez par alias public.</p>
-      </header>
+      {!compact ? (
+        <header className="border-b-[3px] border-double border-ink pb-2">
+          <p className="kicker">Directoire</p>
+          <h3 className="masthead text-2xl sm:text-3xl">Trouver un agent</h3>
+          <p className="marginalia mt-1">Cherchez par alias public.</p>
+        </header>
+      ) : (
+        <p className="marginalia">Cherchez par alias public — sans accent, lettres + chiffres + _.- uniquement.</p>
+      )}
 
-      <form onSubmit={submit} className="mt-4">
+      <form onSubmit={submit} className={compact ? "mt-3" : "mt-4"}>
         <div className="flex items-center gap-2 border-2 border-ink bg-cream px-3 py-2">
           <span className="font-mono text-[12px] font-extrabold uppercase tracking-ultra text-ash">
             ⌕
@@ -124,12 +132,14 @@ export function SearchPanel({
         </ul>
       </div>
 
-      <div className="mt-8 border-t border-rule pt-4">
-        <Stamp tone="cipher" rotate={-3}>Note</Stamp>
-        <p className="marginalia mt-2">
-          Le directoire ne révèle qu'alias et clé publique. Aucune métadonnée privée n'est exposée.
-        </p>
-      </div>
+      {!compact ? (
+        <div className="mt-8 border-t border-rule pt-4">
+          <Stamp tone="cipher" rotate={-3}>Note</Stamp>
+          <p className="marginalia mt-2">
+            Le directoire ne révèle qu'alias et clé publique. Aucune métadonnée privée n'est exposée.
+          </p>
+        </div>
+      ) : null}
     </section>
   );
 }

@@ -17,7 +17,7 @@ export function Feed({
   onPost: (post: Post) => void;
 }) {
   return (
-    <section className="space-y-8">
+    <section className="space-y-6 sm:space-y-8">
       <FeedHeader />
       <Composer identity={identity} onPost={onPost} />
       {posts.length === 0 ? (
@@ -26,7 +26,7 @@ export function Feed({
           hint="Soyez le premier à publier un dispatche public."
         />
       ) : (
-        <div className="space-y-7">
+        <div className="space-y-5 sm:space-y-7">
           {posts.map((post, index) => (
             <Article key={post.id} post={post} index={index + 1} />
           ))}
@@ -43,16 +43,25 @@ function FeedHeader() {
     month: "long",
     year: "numeric",
   });
+  const todayShort = new Date().toLocaleDateString("fr-FR", {
+    day: "2-digit",
+    month: "short",
+  });
   return (
-    <header className="border-b-[3px] border-double border-ink pb-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <p className="kicker">Tirage public · Édition courante</p>
-          <h2 className="masthead mt-1 text-5xl md:text-6xl">Le Tirage</h2>
+    <header className="border-b-[3px] border-double border-ink pb-3 sm:pb-4">
+      <div className="flex flex-wrap items-end justify-between gap-2 sm:gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="kicker">Tirage public</p>
+          <h2 className="masthead mt-1 text-3xl sm:text-4xl md:text-5xl xl:text-6xl">Le Tirage</h2>
         </div>
-        <div className="text-right">
-          <p className="font-mono text-[10.5px] uppercase tracking-ultra text-ash">{today}</p>
-          <p className="mt-1 font-serif italic text-graphite">Imprimé à la maison</p>
+        <div className="shrink-0 text-right">
+          <p className="font-mono text-[10px] uppercase tracking-ultra text-ash sm:text-[10.5px]">
+            <span className="hidden sm:inline">{today}</span>
+            <span className="sm:hidden">{todayShort}</span>
+          </p>
+          <p className="mt-1 font-serif text-xs italic text-graphite sm:text-sm">
+            Imprimé à la maison
+          </p>
         </div>
       </div>
     </header>
@@ -96,17 +105,23 @@ function Composer({
   }
 
   return (
-    <form onSubmit={publish} className="leaf p-5">
-      <div className="flex items-start gap-4">
-        <Sigil text={identity.username} size={48} tone="ink" />
-        <div className="flex-1">
-          <div className="flex items-center justify-between">
-            <p className="font-display text-xl font-semibold leading-none">@{identity.username}</p>
-            <Stamp tone="ink" rotate={-3}>Public · non chiffré</Stamp>
+    <form onSubmit={publish} className="leaf p-4 sm:p-5">
+      <div className="flex items-start gap-3 sm:gap-4">
+        <Sigil text={identity.username} size={40} tone="ink" />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="truncate font-display text-lg font-semibold leading-none sm:text-xl">
+              @{identity.username}
+            </p>
+            <span className="shrink-0">
+              <Stamp tone="ink" rotate={-3}>Public · non chiffré</Stamp>
+            </span>
           </div>
-          <p className="marginalia mt-1">Empreinte {shortHash(identity.publicHash, 6)}</p>
+          <p className="marginalia mt-1 truncate">
+            Empreinte {shortHash(identity.publicHash, 6)}
+          </p>
           <textarea
-            className="field-block mt-3 min-h-[120px]"
+            className="field-block mt-3 min-h-[100px] p-3 text-base sm:min-h-[120px] sm:p-4 sm:text-lg"
             placeholder="Quel est le dispatche du jour ?"
             value={body}
             onChange={(event) => setBody(event.target.value.slice(0, MAX_BODY))}
@@ -147,31 +162,36 @@ function Composer({
 
 function Article({ post, index }: { post: Post; index: number }) {
   const date = new Date(post.createdAt);
-  const dateStr = date.toLocaleString("fr-FR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+  const dateStr = date.toLocaleString("fr-FR", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
   return (
-    <article className="leaf p-6 md:p-8">
-      <header className="mb-4 flex flex-wrap items-baseline justify-between gap-3 border-b border-rule pb-3">
-        <div className="flex items-center gap-3">
-          <Sigil text={post.authorUsername} size={40} tone="ink" />
-          <div>
-            <p className="font-display text-xl font-semibold leading-tight">
+    <article className="leaf p-4 sm:p-6 md:p-8">
+      <header className="mb-3 flex flex-wrap items-baseline justify-between gap-2 border-b border-rule pb-2 sm:mb-4 sm:gap-3 sm:pb-3">
+        <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+          <Sigil text={post.authorUsername} size={36} tone="ink" />
+          <div className="min-w-0">
+            <p className="truncate font-display text-lg font-semibold leading-tight sm:text-xl">
               <span className="text-stamp">@</span>
               {post.authorUsername}
             </p>
-            <p className="font-mono text-[11px] uppercase tracking-widest text-ash">
+            <p className="truncate font-mono text-[10px] uppercase tracking-widest text-ash sm:text-[11px]">
               clé {shortHash(post.authorHash, 6)} · {dateStr}
             </p>
           </div>
         </div>
-        <span className="dispatch-no">№ {String(index).padStart(3, "0")}</span>
+        <span className="dispatch-no shrink-0">№ {String(index).padStart(3, "0")}</span>
       </header>
 
-      <p className="dropcap font-serif text-[18px] leading-[1.65] text-ink md:text-[19px]">
+      <p className="dropcap font-serif text-[16px] leading-[1.6] text-ink sm:text-[18px] sm:leading-[1.65] md:text-[19px]">
         {post.body}
       </p>
 
-      <footer className="mt-5 flex items-center justify-between border-t border-rule pt-3">
-        <div className="flex items-center gap-4 font-mono text-[11px] uppercase tracking-widest text-ash">
+      <footer className="mt-4 flex items-center justify-between border-t border-rule pt-3 sm:mt-5">
+        <div className="flex items-center gap-3 font-mono text-[10px] uppercase tracking-widest text-ash sm:gap-4 sm:text-[11px]">
           <button className="hover:text-stamp">↺ Reposter</button>
           <button className="hover:text-stamp">＋ Annoter</button>
         </div>

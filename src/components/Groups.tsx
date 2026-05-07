@@ -18,22 +18,27 @@ export function Groups({
   return (
     <section>
       <header className="flex flex-wrap items-end justify-between gap-3 border-b-[3px] border-double border-ink pb-3">
-        <div>
+        <div className="min-w-0 flex-1">
           <p className="kicker">Salons fermés</p>
-          <h2 className="masthead text-5xl">Cercles</h2>
+          <h2 className="masthead text-3xl sm:text-4xl md:text-5xl">Cercles</h2>
           <p className="marginalia mt-1">
             Métadonnées publiques. Contenu chiffré sous une clé symétrique partagée hors-bande.
           </p>
         </div>
-        <button className="btn-stamp" onClick={() => setOpen(true)}>＋ Fonder un cercle</button>
+        <button
+          className="btn-stamp shrink-0 px-3 py-2 text-[10px] sm:px-4 sm:text-[11px]"
+          onClick={() => setOpen(true)}
+        >
+          + Fonder
+        </button>
       </header>
 
       {groups.length === 0 ? (
-        <div className="mt-8">
+        <div className="mt-6 sm:mt-8">
           <Empty title="Aucun cercle ouvert" hint="Fondez le premier cercle de ce bureau." />
         </div>
       ) : (
-        <div className="mt-7 grid gap-5 md:grid-cols-2 xl:grid-cols-2">
+        <div className="mt-5 grid gap-4 sm:mt-7 sm:gap-5 md:grid-cols-2">
           {groups.map((group) => (
             <GroupCard key={group.id} group={group} self={group.ownerUsername === identity.username} />
           ))}
@@ -56,21 +61,29 @@ export function Groups({
 
 function GroupCard({ group, self }: { group: Group; self: boolean }) {
   return (
-    <article className="leaf flex flex-col p-5">
-      <header className="flex items-start justify-between gap-3 border-b border-rule pb-3">
-        <div className="flex items-center gap-3">
-          <Sigil text={group.name} size={44} tone="moss" />
-          <div>
-            <p className="kicker">Cercle №{group.id.slice(0, 6)}</p>
-            <h3 className="font-display text-2xl font-bold leading-tight">{group.name}</h3>
+    <article className="leaf flex flex-col p-4 sm:p-5">
+      <header className="flex items-start justify-between gap-2 border-b border-rule pb-2 sm:gap-3 sm:pb-3">
+        <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+          <Sigil text={group.name} size={36} tone="moss" />
+          <div className="min-w-0">
+            <p className="truncate kicker">Cercle №{group.id.slice(0, 6)}</p>
+            <h3 className="break-words font-display text-xl font-bold leading-tight sm:text-2xl">
+              {group.name}
+            </h3>
           </div>
         </div>
-        {self ? <Stamp tone="stamp" rotate={6}>Fondateur</Stamp> : null}
+        {self ? (
+          <span className="shrink-0">
+            <Stamp tone="stamp" rotate={6}>Fondateur</Stamp>
+          </span>
+        ) : null}
       </header>
-      <p className="mt-3 font-serif text-base leading-7 text-graphite">{group.topic}</p>
-      <footer className="mt-5 flex items-center justify-between border-t border-rule pt-3 font-mono text-[10.5px] uppercase tracking-ultra text-ash">
+      <p className="mt-3 font-serif text-[15px] leading-6 text-graphite sm:text-base sm:leading-7">
+        {group.topic}
+      </p>
+      <footer className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-rule pt-3 font-mono text-[10px] uppercase tracking-ultra text-ash sm:mt-5 sm:text-[10.5px]">
         <span>{group.memberCount} membre{group.memberCount > 1 ? "s" : ""}</span>
-        <span>fondé par @{group.ownerUsername}</span>
+        <span className="truncate">fondé par @{group.ownerUsername}</span>
       </footer>
       <p className="mt-2 truncate font-mono text-[10px] text-chalk">
         intro cipher {shortHash(group.encryptedIntro.cipher, 6)}
@@ -123,8 +136,11 @@ function CreateModal({
   }
 
   return (
-    <div className="fixed inset-0 z-40 grid place-items-center bg-ink/40 p-4 backdrop-blur-sm" role="dialog">
-      <div className="leaf relative w-full max-w-xl p-6 animate-rise-in">
+    <div
+      className="fixed inset-0 z-40 grid place-items-end bg-ink/40 backdrop-blur-sm sm:place-items-center sm:p-4"
+      role="dialog"
+    >
+      <div className="leaf animate-rise-in relative max-h-[92vh] w-full overflow-y-auto p-4 sm:max-w-xl sm:p-6">
         <button
           className="absolute right-4 top-3 font-mono text-[11px] font-bold uppercase tracking-ultra text-ash hover:text-stamp"
           onClick={onClose}
@@ -134,7 +150,7 @@ function CreateModal({
         {!created ? (
           <form onSubmit={submit}>
             <p className="kicker">Fondation</p>
-            <h3 className="masthead text-4xl">Nouveau cercle</h3>
+            <h3 className="masthead text-2xl sm:text-3xl md:text-4xl">Nouveau cercle</h3>
             <p className="marginalia mt-1">
               Le serveur retient le nom et le sujet. L'intro et le contenu utiliseront la clé symétrique générée.
             </p>
@@ -185,7 +201,9 @@ function CreateModal({
         ) : (
           <div>
             <Stamp tone="stamp" rotate={-4}>Cercle fondé</Stamp>
-            <h3 className="masthead mt-4 text-4xl">{created.group.name}</h3>
+            <h3 className="masthead mt-3 break-words text-2xl sm:mt-4 sm:text-3xl md:text-4xl">
+              {created.group.name}
+            </h3>
             <p className="marginalia mt-1">
               Sa clé symétrique est conservée localement. Pour faire entrer un membre, transmettez-la hors-bande.
             </p>

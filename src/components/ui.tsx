@@ -97,22 +97,22 @@ export function CopyBox({
 }) {
   return (
     <div className="leaf relative p-3">
-      <div className="mb-2 flex items-center justify-between gap-3">
-        <span className="kicker">{label}</span>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="kicker truncate">{label}</span>
         <button
           type="button"
-          className="font-mono text-[10px] font-extrabold uppercase tracking-ultra text-stamp underline-offset-4 hover:underline"
+          className="shrink-0 font-mono text-[10px] font-extrabold uppercase tracking-ultra text-stamp underline-offset-4 hover:underline"
           onClick={() => navigator.clipboard.writeText(value)}
         >
           ⎘ Copier
         </button>
       </div>
       {multiline ? (
-        <pre className="max-h-44 overflow-auto whitespace-pre-wrap break-all font-mono text-[11.5px] leading-5 text-graphite">
+        <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all font-mono text-[10.5px] leading-5 text-graphite sm:text-[11.5px]">
           {reveal ? value : value.replace(/[a-zA-Z0-9+/=]/g, "•")}
         </pre>
       ) : (
-        <code className="block break-all font-mono text-[12px] leading-5 text-graphite">
+        <code className="block break-all font-mono text-[11px] leading-5 text-graphite sm:text-[12px]">
           {reveal ? value : value.replace(/[a-zA-Z0-9+/=]/g, "•")}
         </code>
       )}
@@ -130,10 +130,10 @@ export function Masthead({
   italic?: boolean;
 }) {
   const map: Record<string, string> = {
-    sm: "text-3xl",
-    md: "text-5xl",
-    lg: "text-7xl",
-    xl: "text-[clamp(3rem,9vw,7.5rem)]",
+    sm: "text-2xl sm:text-3xl",
+    md: "text-3xl sm:text-4xl md:text-5xl",
+    lg: "text-[clamp(2.25rem,8vw,4.5rem)]",
+    xl: "text-[clamp(2.5rem,11vw,7.5rem)]",
   };
   return (
     <h1
@@ -172,9 +172,9 @@ export function Spinner({ label = "ATTENTE", style }: { label?: string; style?: 
 
 export function Empty({ title, hint, action }: { title: string; hint: string; action?: ReactNode }) {
   return (
-    <div className="leaf p-8 text-center">
+    <div className="leaf p-5 text-center sm:p-8">
       <Fleuron />
-      <p className="mt-4 font-display text-2xl italic text-graphite">{title}</p>
+      <p className="mt-4 font-display text-xl italic text-graphite sm:text-2xl">{title}</p>
       <p className="marginalia mt-2">{hint}</p>
       {action ? <div className="mt-5 flex justify-center">{action}</div> : null}
     </div>

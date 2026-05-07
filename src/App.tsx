@@ -224,6 +224,7 @@ export default function App() {
               ),
             )
           }
+          onOpenConversationWith={openConversationWith}
         />
       ) : null}
       {view === "groups" ? (

@@ -25,20 +25,22 @@ export function Dossier({
     <section>
       <header className="border-b-[3px] border-double border-ink pb-3">
         <p className="kicker">Pièce confidentielle</p>
-        <h2 className="masthead text-5xl">Dossier d'agent</h2>
+        <h2 className="masthead text-3xl sm:text-4xl md:text-5xl">Dossier d'agent</h2>
         <p className="marginalia mt-1">
           État de votre identité. Vos clés privées vivent chiffrées dans IndexedDB de ce
           navigateur, déverrouillées uniquement par votre mot de passe local.
         </p>
       </header>
 
-      <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_1.4fr]">
-        <article className="leaf relative p-6">
-          <div className="absolute -right-3 -top-3 animate-stamp">
+      <div className="mt-5 grid gap-5 sm:mt-6 sm:gap-6 lg:grid-cols-[1fr_1.4fr]">
+        <article className="leaf relative p-4 sm:p-6">
+          <div className="absolute -right-2 -top-2 animate-stamp sm:-right-3 sm:-top-3">
             <Stamp tone="stamp" rotate={-7}>Vérifié</Stamp>
           </div>
-          <Sigil text={identity.username} size={88} tone="stamp" />
-          <h3 className="masthead mt-4 text-4xl">@{identity.username}</h3>
+          <Sigil text={identity.username} size={64} tone="stamp" />
+          <h3 className="masthead mt-3 break-words text-2xl sm:mt-4 sm:text-3xl md:text-4xl">
+            @{identity.username}
+          </h3>
           <p className="mt-1 font-mono text-[11px] uppercase tracking-ultra text-ash">
             créé {new Date(identity.createdAt).toLocaleDateString("fr-FR")}
           </p>

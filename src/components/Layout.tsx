@@ -38,7 +38,7 @@ export function Shell({
         conversations={conversations}
         health={health}
       />
-      <main className="border-x border-rule bg-paper px-5 pb-32 pt-6 md:px-10 lg:pb-12">
+      <main className="border-x border-rule bg-paper px-4 pb-28 pt-5 sm:px-6 md:px-10 md:pt-6 lg:pb-12">
         {children}
       </main>
       <aside className="hidden border-r border-rule bg-paper px-6 pb-12 pt-8 xl:block">
@@ -181,18 +181,30 @@ function SideRail({
 
 function BottomNav({ view, navigate }: { view: View; navigate: (v: View) => void }) {
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 border-t-2 border-ink bg-cream/95 backdrop-blur lg:hidden">
-      {NAV.map((item) => {
+    <nav
+      className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 border-t-2 border-ink bg-cream/95 backdrop-blur lg:hidden"
+      style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+    >
+      {NAV.map((item, idx) => {
         const active = view === item.id;
+        const dispatchNo = String(idx + 1).padStart(2, "0");
         return (
           <button
             key={item.id}
-            className={`relative flex flex-col items-center justify-center gap-0.5 border-r border-rule py-2.5 last:border-r-0 ${
+            aria-label={`${item.label} — ${item.tag}`}
+            className={`group relative flex flex-col items-center justify-center gap-0.5 border-r border-rule py-2 last:border-r-0 transition ${
               active ? "bg-ink text-cream" : "text-ink"
             }`}
             onClick={() => navigate(item.id)}
           >
-            <span className="font-display text-base font-bold leading-tight">{item.label}</span>
+            <span
+              className={`absolute left-1.5 top-1 font-mono text-[8px] tracking-ultra ${
+                active ? "text-cream/70" : "text-ash"
+              }`}
+            >
+              N°{dispatchNo}
+            </span>
+            <span className="font-display text-[15px] font-bold leading-none">{item.label}</span>
             <span
               className={`font-mono text-[8.5px] uppercase tracking-ultra ${
                 active ? "text-cream/80" : "text-ash"

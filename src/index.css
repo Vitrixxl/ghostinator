@@ -18,14 +18,21 @@
     overflow-x: hidden;
     color: #181410;
     font-family: "Newsreader", Georgia, serif;
-    font-size: 17px;
-    line-height: 1.55;
+    font-size: 16px;
+    line-height: 1.5;
     background-color: #ede4d0;
     background-image:
       radial-gradient(ellipse at 16% 8%, rgba(184, 37, 43, 0.08), transparent 36%),
       radial-gradient(ellipse at 96% 92%, rgba(31, 53, 82, 0.07), transparent 42%),
       radial-gradient(circle at 60% 38%, rgba(122, 91, 48, 0.06), transparent 50%);
     background-attachment: fixed;
+  }
+
+  @media (min-width: 768px) {
+    body {
+      font-size: 17px;
+      line-height: 1.55;
+    }
   }
 
   body::before {
@@ -221,16 +228,52 @@
     transform: rotate(-7deg);
   }
 
-  /* Drop cap for posts */
+  /* Drop cap for posts — réduit sur mobile pour laisser respirer le texte. */
   .dropcap::first-letter {
     font-family: "Fraunces", "Newsreader", serif;
     font-weight: 700;
-    font-size: 4.6rem;
+    font-size: 3rem;
     line-height: 0.85;
     float: left;
-    padding: 0.4rem 0.75rem 0 0;
+    padding: 0.35rem 0.55rem 0 0;
     color: #b8252b;
     font-variation-settings: "opsz" 144, "SOFT" 0, "WONK" 1;
+  }
+  @media (min-width: 768px) {
+    .dropcap::first-letter {
+      font-size: 4.6rem;
+      padding: 0.4rem 0.75rem 0 0;
+    }
+  }
+
+  /* Lien outil (kicker mais cliquable) */
+  .kicker-link {
+    @apply font-mono text-[10.5px] font-bold uppercase tracking-ultra text-stamp underline-offset-4 hover:underline;
+  }
+
+  /* Bouton flottant pour actions principales en mobile (FAB style « cachet »).
+     Repose sur le langage des stamps : carré, ombre épaisse, rotation légère. */
+  .fab-stamp {
+    @apply fixed z-40 inline-flex items-center justify-center gap-2 border-[2.5px] border-stampDeep bg-stamp px-4 py-3 font-mono text-[11px] font-extrabold uppercase tracking-ultra text-cream;
+    box-shadow: 3px 3px 0 #181410;
+    transform: rotate(-2deg);
+  }
+  .fab-stamp:active {
+    transform: rotate(-2deg) translate(1px, 1px);
+    box-shadow: 1px 1px 0 #181410;
+  }
+
+  /* Boutons mono-icône compacts (toggle liste/thread, fermeture modal, etc.) */
+  .btn-icon {
+    @apply inline-flex h-9 w-9 shrink-0 items-center justify-center border-2 border-ink bg-cream font-mono text-base font-bold text-ink transition;
+  }
+  .btn-icon:hover {
+    background: #181410;
+    color: #f5eedb;
+  }
+  .btn-icon:disabled {
+    opacity: 0.4;
+    pointer-events: none;
   }
 
   /* Header masthead lines */
