@@ -1,7 +1,8 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useCallback, useState } from "react";
 import * as api from "../lib/api";
 import { shortHash } from "../lib/crypto";
 import type { Identity, Post } from "../types";
+import { isTurnstileEnabled, TurnstileWidget } from "./Turnstile";
 import { Empty, Fleuron, Sigil, Stamp } from "./ui";
 
 const MAX_BODY = 280;
@@ -68,17 +69,22 @@ function Composer({
   const [body, setBody] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [turnstileToken, setTurnstileToken] = useState<string>("");
+  const onTurnstileToken = useCallback((token: string) => setTurnstileToken(token), []);
+  const turnstileReady = !isTurnstileEnabled() || turnstileToken.length > 0;
 
   async function publish(event: FormEvent) {
     event.preventDefault();
-    if (!body.trim() || submitting) return;
+    if (!body.trim() || submitting || !turnstileReady) return;
     setSubmitting(true);
     setError(null);
     try {
       const post = await api.createPost({
         authorUsername: identity.username,
         authorHash: identity.publicHash,
+        authorPublicKeyEd25519: identity.publicKeyEd25519,
         body: body.trim().slice(0, MAX_BODY),
+        turnstileToken: turnstileToken || undefined,
       });
       onPost(post);
       setBody("");
@@ -106,6 +112,12 @@ function Composer({
             onChange={(event) => setBody(event.target.value.slice(0, MAX_BODY))}
             maxLength={MAX_BODY}
           />
+          {isTurnstileEnabled() ? (
+            <div className="mt-3">
+              <TurnstileWidget onToken={onTurnstileToken} />
+            </div>
+          ) : null}
+
           <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
             <span
               className={`font-mono text-[11px] font-bold uppercase tracking-ultra ${
@@ -118,8 +130,12 @@ function Composer({
               {error ? (
                 <span className="font-mono text-[10.5px] uppercase tracking-ultra text-stamp">{error}</span>
               ) : null}
-              <button className="btn-stamp" type="submit" disabled={!body.trim() || submitting}>
-                {submitting ? "Impression…" : "Publier"}
+              <button
+                className="btn-stamp"
+                type="submit"
+                disabled={!body.trim() || submitting || !turnstileReady}
+              >
+                {submitting ? "Calcul du PoW…" : "Publier"}
               </button>
             </div>
           </div>
