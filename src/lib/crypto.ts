@@ -496,18 +496,46 @@ export function identityExport(identity: Identity) {
 }
 
 export async function identityFromImport(payload: string): Promise<Identity> {
-  const data = JSON.parse(payload);
+  let data: Record<string, unknown>;
+  try {
+    data = JSON.parse(payload);
+  } catch {
+    throw new Error("Export invalide : JSON malformé");
+  }
   if (data.v !== VERSION) {
     throw new Error(`Version d'identité incompatible (attendu ${VERSION}, reçu ${data.v})`);
+  }
+  if (
+    typeof data.username !== "string" ||
+    typeof data.publicHash !== "string" ||
+    typeof data.publicKeyEd25519 !== "string" ||
+    typeof data.publicKeyX25519 !== "string" ||
+    typeof data.privateJwkEd25519 !== "object" ||
+    typeof data.privateJwkX25519 !== "object" ||
+    typeof data.createdAt !== "number"
+  ) {
+    throw new Error("Export invalide : champs manquants");
   }
   return {
     username: data.username,
     publicHash: data.publicHash,
     publicKeyEd25519: data.publicKeyEd25519,
     publicKeyX25519: data.publicKeyX25519,
-    privateJwkEd25519: data.privateJwkEd25519,
-    privateJwkX25519: data.privateJwkX25519,
+    privateJwkEd25519: data.privateJwkEd25519 as JsonWebKey,
+    privateJwkX25519: data.privateJwkX25519 as JsonWebKey,
     createdAt: data.createdAt,
     version: VERSION,
   };
+}
+
+/** Restaure une identité depuis un export hors-ligne et la chiffre dans IndexedDB
+ *  avec un nouveau mot de passe local (propre à ce navigateur). */
+export async function restoreFromExport(
+  exportJson: string,
+  newLocalPassword: string,
+): Promise<Identity> {
+  const identity = await identityFromImport(exportJson);
+  await persistIdentity(identity, newLocalPassword);
+  await activateIdentity(identity, newLocalPassword);
+  return identity;
 }

@@ -4,6 +4,7 @@ import {
   activateIdentity,
   createIdentity,
   identityExport,
+  restoreFromExport,
   shortHash,
 } from "../lib/crypto";
 import type { Identity } from "../types";
@@ -11,8 +12,10 @@ import { isTurnstileEnabled, TurnstileWidget } from "./Turnstile";
 import { CopyBox, Fleuron, Masthead, Sigil, Stamp } from "./ui";
 
 type Stage = "alias" | "minting" | "dossier";
+type Mode = "create" | "import";
 
 export function Onboarding({ onReady }: { onReady: (identity: Identity) => Promise<void> | void }) {
+  const [mode, setMode] = useState<Mode>("create");
   const [stage, setStage] = useState<Stage>("alias");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -23,12 +26,36 @@ export function Onboarding({ onReady }: { onReady: (identity: Identity) => Promi
   const [revealPrivate, setRevealPrivate] = useState(false);
   const [turnstileToken, setTurnstileToken] = useState<string>("");
   const [progress, setProgress] = useState<string>("");
+  const [importJson, setImportJson] = useState("");
+  const [importing, setImporting] = useState(false);
 
   const validUsername = /^[a-zA-Z0-9_.\-]{2,32}$/.test(username);
   const validPassword = password.length >= 10 && password === passwordConfirm;
   const turnstileReady = !isTurnstileEnabled() || turnstileToken.length > 0;
 
   const onTurnstileToken = useCallback((token: string) => setTurnstileToken(token), []);
+
+  async function startImport(event: FormEvent) {
+    event.preventDefault();
+    setError(null);
+    if (!importJson.trim()) {
+      setError("Colle le JSON exporté lors de la création.");
+      return;
+    }
+    if (password.length < 10 || password !== passwordConfirm) {
+      setError("Mot de passe local : 10 caractères minimum, identique dans les deux champs.");
+      return;
+    }
+    setImporting(true);
+    try {
+      const restored = await restoreFromExport(importJson.trim(), password);
+      await onReady(restored);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Import impossible");
+    } finally {
+      setImporting(false);
+    }
+  }
 
   async function startMint(event: FormEvent) {
     event.preventDefault();
@@ -93,19 +120,111 @@ export function Onboarding({ onReady }: { onReady: (identity: Identity) => Promi
 
         <main className="grid grid-cols-1 gap-8 py-8 sm:gap-10 sm:py-10 md:grid-cols-[1.2fr_1fr] md:py-12">
           <section className="animate-rise-in" style={{ animationDelay: "120ms" }}>
-            <Stamp tone="stamp" rotate={-3}>Étape {stage === "alias" || stage === "minting" ? "1" : "2"} / 2</Stamp>
+            <Stamp tone="stamp" rotate={-3}>
+              {stage === "dossier"
+                ? "Étape 2 / 2"
+                : mode === "import"
+                  ? "Restauration"
+                  : "Étape 1 / 2"}
+            </Stamp>
             <h2 className="masthead mt-4 text-3xl sm:mt-5 sm:text-4xl md:text-5xl xl:text-6xl">
               {stage === "dossier"
                 ? "Votre dossier vient d'être ouvert"
-                : "Forger une identité anonyme"}
+                : mode === "import"
+                  ? "Restaurer un dossier existant"
+                  : "Forger une identité anonyme"}
             </h2>
             <p className="marginalia mt-4 max-w-md">
               {stage === "dossier"
                 ? "Une paire Ed25519 (signature) et une paire X25519 (DM E2EE) ont été forgées dans votre navigateur. Le serveur n'a reçu que les clés publiques."
-                : "Choisissez un alias public et un mot de passe local. Le mot de passe chiffre votre clé privée dans IndexedDB ; il n'est jamais transmis."}
+                : mode === "import"
+                  ? "Colle l'export JSON sauvegardé hors-ligne lors de la création de ton identité. Choisis un mot de passe local pour ce navigateur — il chiffrera la clé privée dans IndexedDB."
+                  : "Choisissez un alias public et un mot de passe local. Le mot de passe chiffre votre clé privée dans IndexedDB ; il n'est jamais transmis."}
             </p>
 
             {stage !== "dossier" ? (
+              <div className="mt-6 inline-flex border-2 border-ink bg-cream font-mono text-[11px] font-bold uppercase tracking-ultra">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode("create");
+                    setError(null);
+                  }}
+                  className={`px-3 py-2 transition ${mode === "create" ? "bg-ink text-cream" : "text-ink hover:bg-stamp/10"}`}
+                >
+                  Nouvelle identité
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode("import");
+                    setError(null);
+                  }}
+                  className={`border-l-2 border-ink px-3 py-2 transition ${mode === "import" ? "bg-ink text-cream" : "text-ink hover:bg-stamp/10"}`}
+                >
+                  Importer un export
+                </button>
+              </div>
+            ) : null}
+
+            {stage !== "dossier" && mode === "import" ? (
+              <form onSubmit={startImport} className="mt-6 max-w-md sm:mt-8">
+                <div>
+                  <label className="kicker mb-1 block">Export JSON (sauvegardé hors-ligne)</label>
+                  <textarea
+                    className="field-block min-h-[160px] p-3 font-mono text-[11px]"
+                    placeholder='{"username":"…","publicHash":"…","v":4,…}'
+                    value={importJson}
+                    onChange={(e) => {
+                      setImportJson(e.target.value);
+                      setError(null);
+                    }}
+                    spellCheck={false}
+                    autoFocus
+                  />
+                  <p className="marginalia mt-2">
+                    Tu n'as pas l'export ? Tu ne peux pas récupérer cette identité — c'est le prix de l'anonymat réel.
+                  </p>
+                </div>
+                <div className="mt-5">
+                  <label className="kicker mb-1 block">Mot de passe local (≥ 10 caractères)</label>
+                  <input
+                    type="password"
+                    autoComplete="new-password"
+                    className="field"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    disabled={importing}
+                  />
+                </div>
+                <div className="mt-3">
+                  <label className="kicker mb-1 block">Confirmation</label>
+                  <input
+                    type="password"
+                    autoComplete="new-password"
+                    className="field"
+                    value={passwordConfirm}
+                    onChange={(e) => setPasswordConfirm(e.target.value)}
+                    disabled={importing}
+                  />
+                  <p className="marginalia mt-2">
+                    Ce mot de passe est propre à ce navigateur — il peut être différent de celui d'un autre appareil.
+                  </p>
+                </div>
+                {error ? (
+                  <p className="mt-3 inline-flex border-2 border-stamp bg-stamp/5 px-2 py-1 font-mono text-[11px] font-bold uppercase tracking-ultra text-stamp">
+                    {error}
+                  </p>
+                ) : null}
+                <div className="mt-8 flex flex-wrap items-center gap-4">
+                  <button className="btn-stamp" type="submit" disabled={importing}>
+                    {importing ? "Restauration…" : "Restaurer ce dossier"}
+                  </button>
+                </div>
+              </form>
+            ) : null}
+
+            {stage !== "dossier" && mode === "create" ? (
               <form onSubmit={startMint} className="mt-6 max-w-md sm:mt-10">
                 <div>
                   <label className="kicker mb-1 block">Alias public</label>
