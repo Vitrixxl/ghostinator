@@ -7,16 +7,22 @@ export type User = {
   id: string;
   username: string;
   publicHash: string;
-  publicKey: string; // base64 raw P-256 public key
+  publicKeyEd25519: string;
+  publicKeyX25519: string;
   createdAt: string;
 };
 
 export type Identity = {
   username: string;
   publicHash: string;
-  publicKey: string; // base64 raw
-  privateJwk: JsonWebKey;
+  publicKeyEd25519: string;
+  publicKeyX25519: string;
+  privateJwkEd25519: JsonWebKey;
+  privateJwkX25519: JsonWebKey;
   createdAt: number;
+  version: number;
+  /** Présent uniquement pour les blobs « clé de groupe » (pas pour les vraies identités). */
+  groupRawKey?: string;
 };
 
 export type Post = {
@@ -41,7 +47,7 @@ export type Conversation = {
   ownerHash: string;
   peerHash: string;
   peerUsername: string;
-  peerPublicKey: string;
+  peerPublicKeyX25519: string;
   createdAt: string;
   messages: Message[];
 };
