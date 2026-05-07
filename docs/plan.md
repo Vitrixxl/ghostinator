@@ -2,7 +2,7 @@
 
 > Lots de travail, qui s'en charge, statut, dépendances. Détail au demi-jour.
 
-**Auteurs :** Vitrixxl, Amurius
+**Auteurs :** Artus, Vitrice
 
 ---
 
@@ -22,17 +22,17 @@
 
 | # | Lot | Owner | Estimé | Statut | Dépend de |
 |---|---|---|---|---|---|
-| L1 | Artefacts écrits : tensions, ADR-0001/2/3/4, defense, architecture, plan, README enrichi | Vitrixxl + Amurius (co-rédigés) | 1h30 | fait | — |
-| L2 | Schéma data : ajout colonnes `public_key_ed25519`, `public_key_x25519` dans `users` (migration `supabase/schema.sql`) | Amurius | 15 min | en cours | L1 |
-| L3 | Crypto client : `src/lib/crypto.ts` v4 — Ed25519 + X25519 + IndexedDB chiffrée + PBKDF2 | Vitrixxl | 1h | à faire | L2 |
-| L4 | API client : `src/lib/api.ts` — wrapper qui signe chaque requête sortante | Vitrixxl | 30 min | à faire | L3 |
-| L5 | Worker + Express : vérification Ed25519, durcissement edge (CORS strict, headers de sécu, drop CF-Connecting-IP) | Amurius | 1h | à faire | L2 |
-| L6 | Proof-of-Work signup + post (client + Worker) | Amurius | 1h | à faire | L5 |
-| L7 | Rate-limit hashé (Worker, Map en dev, KV en prod) | Amurius | 45 min | à faire | L5 |
-| L8 | Turnstile widget + siteverify | Vitrixxl | 1h | à faire | L4, L5 |
-| L9 | CI GitHub Actions (lint + typecheck + build + tests) | Vitrixxl | 30 min | à faire | L1 |
-| L10 | Tests unitaires crypto (Vitest) + test E2E story critique | Amurius | 1h | à faire | L3, L5 |
-| L11 | Postmortem final + finalisation README | Vitrixxl + Amurius | 30 min | à faire | tout le reste |
+| L1 | Artefacts écrits : tensions, ADR-0001/2/3/4, defense, architecture, plan, README enrichi | Artus + Vitrice (co-rédigés) | 1h30 | fait | — |
+| L2 | Schéma data : ajout colonnes `public_key_ed25519`, `public_key_x25519` dans `users` (migration `supabase/schema.sql`) | Artus | 15 min | en cours | L1 |
+| L3 | Crypto client : `src/lib/crypto.ts` v4 — Ed25519 + X25519 + IndexedDB chiffrée + PBKDF2 | Vitrice | 1h | à faire | L2 |
+| L4 | API client : `src/lib/api.ts` — wrapper qui signe chaque requête sortante | Vitrice | 30 min | à faire | L3 |
+| L5 | Worker + Express : vérification Ed25519, durcissement edge (CORS strict, headers de sécu, drop CF-Connecting-IP) | Artus | 1h | à faire | L2 |
+| L6 | Proof-of-Work signup + post (client + Worker) | Artus | 1h | à faire | L5 |
+| L7 | Rate-limit hashé (Worker, Map en dev, KV en prod) | Artus | 45 min | à faire | L5 |
+| L8 | Turnstile widget + siteverify | Vitrice | 1h | à faire | L4, L5 |
+| L9 | CI GitHub Actions (lint + typecheck + build + tests) | Vitrice | 30 min | à faire | L1 |
+| L10 | Tests unitaires crypto (Vitest) + test E2E story critique | Artus | 1h | à faire | L3, L5 |
+| L11 | Postmortem final + finalisation README | Artus + Vitrice | 30 min | à faire | tout le reste |
 
 **Total estimé :** ~9h cumulées, parallélisable sur 2 dev → ~5h de wall-clock.
 
@@ -74,7 +74,7 @@ Voir `docs/architecture.md` §11 pour le détail.
 | Supabase free pause si on n'a pas pingé depuis 7 j | Très faible | Moyen | Cron Workers gratuit qui ping toutes les 24 h (à brancher demain). En démo : warm-up manuel à 14h. |
 | Test E2E flaky en CI | Moyen | Faible | Si flaky, on l'isole dans un job non-bloquant et on documente. Mieux vaut un test stable que pas de test. |
 | Régression visuelle après refacto crypto | Moyen | Moyen | Tester onboarding + envoi DM à la main entre 15h et 15h30. |
-| Auteur unique sur l'historique git | Élevé (situation de départ) | Très négatif (brief §3.2.1) | Branches `feat/*` distinctes par lot, owner explicite, PRs croisées Vitrixxl ↔ Amurius. Voir `docs/plan.md` §commits. |
+| Auteur unique sur l'historique git | Élevé (situation de départ) | Très négatif (brief §3.2.1) | Branches `feat/*` distinctes par lot, owner explicite, PRs croisées Artus ↔ Vitrice. Voir `docs/plan.md` §commits. |
 
 ---
 
@@ -82,24 +82,24 @@ Voir `docs/architecture.md` §11 pour le détail.
 
 Les lots sont attribués pour qu'on ait *deux* auteurs visibles dans `git log`. Chaque commit suit Conventional Commits (cf. brief §3.2.2).
 
-### Branche `feat/docs-artefacts` — Vitrixxl + Amurius en co-auteur
+### Branche `feat/docs-artefacts` — Artus + Vitrice en co-auteur
 
-1. `docs: tensions.md auto-audit du brief` — Vitrixxl (auteur principal)
-2. `docs(adr): 0001 vendor lock-in Cloudflare` — Amurius
-3. `docs(adr): 0002 anonymisation vs auditabilité` — Vitrixxl
-4. `docs(adr): 0003 auth Ed25519 client-side` — Amurius
-5. `docs(adr): 0004 Supabase Postgres + RLS` — Vitrixxl
-6. `docs: defense.md questions difficiles` — Amurius
-7. `docs: architecture.md aligné MVP` — Vitrixxl
-8. `docs: plan.md découpage journée` — Amurius
+1. `docs: tensions.md auto-audit du brief` — Vitrice (auteur principal)
+2. `docs(adr): 0001 vendor lock-in Cloudflare` — Artus
+3. `docs(adr): 0002 anonymisation vs auditabilité` — Vitrice
+4. `docs(adr): 0003 auth Ed25519 client-side` — Artus
+5. `docs(adr): 0004 Supabase Postgres + RLS` — Vitrice
+6. `docs: defense.md questions difficiles` — Artus
+7. `docs: architecture.md aligné MVP` — Vitrice
+8. `docs: plan.md découpage journée` — Artus
 
-### Branche `feat/edge-hardening` — Amurius
+### Branche `feat/edge-hardening` — Artus
 
 9. `feat(worker): CORS strict + headers de sécurité`
 10. `feat(worker): drop CF-Connecting-IP défensivement`
 11. `feat(pages): _headers CSP HSTS X-Frame-Options`
 
-### Branche `feat/auth-ed25519` — Vitrixxl
+### Branche `feat/auth-ed25519` — Vitrice
 
 12. `feat(crypto): generate Ed25519 + X25519 keypairs via WebCrypto`
 13. `feat(crypto): IndexedDB chiffrée via PBKDF2 + AES-GCM`
@@ -107,23 +107,23 @@ Les lots sont attribués pour qu'on ait *deux* auteurs visibles dans `git log`. 
 15. `feat(worker): verify Ed25519 signature with replay protection`
 16. `feat(crypto): mnémonique BIP-39 à l'onboarding`
 
-### Branche `feat/dm-e2ee-x25519` — Vitrixxl
+### Branche `feat/dm-e2ee-x25519` — Vitrice
 
 17. `refactor(crypto): replace P-256 ECDH with X25519`
 18. `feat(api): expose public_key_x25519 in users directory`
 
-### Branche `feat/anti-spam` — Amurius
+### Branche `feat/anti-spam` — Artus
 
 19. `feat(crypto): proof-of-work hashcash 18 bits client`
 20. `feat(worker): verify PoW on signup and post creation`
 21. `feat(worker): rate-limit by hash(pubkey + day + secret)`
 
-### Branche `feat/turnstile` — Vitrixxl
+### Branche `feat/turnstile` — Vitrice
 
 22. `feat(client): Turnstile widget on signup and post`
 23. `feat(worker): siteverify Turnstile token`
 
-### Branche `feat/ci-tests` — Amurius
+### Branche `feat/ci-tests` — Artus
 
 24. `chore(ci): GitHub Actions lint + typecheck + build`
 25. `test(crypto): Ed25519 sign/verify + X25519 derive`

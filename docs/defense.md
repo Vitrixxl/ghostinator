@@ -2,7 +2,7 @@
 
 > Préparation Q&A. 5 questions difficiles + réponses 3-5 lignes. Aucune question facile : si une question d'ici nous paraît facile, c'est qu'on ne se l'est pas vraiment posée.
 
-**Auteurs :** Vitrixxl, Amurius
+**Auteurs :** Artus, Vitrice
 **Date :** 2026-05-07
 
 ---

@@ -2,7 +2,7 @@
 
 > Auto-audit (brief §2.9.1). Document court, pas exhaustif. Quatre tensions concrètes que nous avons croisées en lisant le brief, et nos arbitrages assumés.
 
-**Auteurs :** Vitrixxl, Amurius
+**Auteurs :** Artus, Vitrice
 **Date :** 2026-05-07
 **Sujet imposé :** Réseau social fantôme (groupe 8)
 **Contraintes imposées :** Anonymisation totale, équipe sans admin sys

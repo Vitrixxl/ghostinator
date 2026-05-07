@@ -2,7 +2,7 @@
 
 **Statut :** Accepté
 **Date :** 2026-05-07
-**Auteurs :** Vitrixxl, Amurius
+**Auteurs :** Artus, Vitrice
 
 ---
 

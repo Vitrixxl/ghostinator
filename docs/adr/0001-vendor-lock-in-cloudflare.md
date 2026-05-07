@@ -2,7 +2,7 @@
 
 **Statut :** Accepté
 **Date :** 2026-05-07
-**Auteurs :** Vitrixxl, Amurius
+**Auteurs :** Artus, Vitrice
 **ADR obligatoire (brief §2.3.2) :** oui — réponse à la contrainte d'imprévu annoncée 15 jours avant la session
 
 ---

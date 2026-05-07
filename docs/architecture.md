@@ -2,7 +2,7 @@
 
 > Réseau social fantôme. Anonymisation totale par construction, budget de démarrage quasi nul, équipe sans admin sys. Document de référence aligné avec le code livré le 2026-05-07.
 
-**Auteurs :** Vitrixxl, Amurius
+**Auteurs :** Artus, Vitrice
 **Date :** 2026-05-07
 **Version :** 1.0 — MVP
 

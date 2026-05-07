@@ -48,8 +48,8 @@ Auto-audit du brief avec citations textuelles : [`docs/tensions.md`](docs/tensio
 
 ## Équipe
 
-- **Vitrixxl** — co-dev / co-devops. Crypto client, IndexedDB chiffrée, signature API, Turnstile, CI.
-- **Amurius** — co-dev / co-devops. Edge hardening, vérification serveur, PoW, rate-limit, tests.
+- **Artus** (compte GitHub `Amurius`) — co-dev / co-devops. Edge hardening, vérification serveur, PoW, rate-limit, tests.
+- **Vitrice** (compte GitHub `Vitrixxl`) — co-dev / co-devops. Crypto client, IndexedDB chiffrée, signature API, Turnstile, CI.
 
 Répartition des lots détaillée dans [`docs/plan.md`](docs/plan.md).
 

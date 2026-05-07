@@ -1,6 +1,6 @@
 # Postmortem — Ghostinator (journée du 2026-05-07)
 
-**Auteurs :** Vitrixxl, Amurius
+**Auteurs :** Artus, Vitrice
 **Date :** 2026-05-07
 **Sujet imposé :** Réseau social fantôme (groupe 8)
 
@@ -51,6 +51,6 @@ Une journée pour aligner le code sur l'architecture présentée trois semaines 
 
 ## Ce que dit *vraiment* l'historique git
 
-Deux auteurs (Vitrixxl, Amurius), 28 commits étalés sur la journée, 7 branches `feat/*` mergées via PR. Pas de push direct sur `main`, CI verte sur chaque PR. Détail : `docs/plan.md` §commits.
+Deux auteurs (Artus, Vitrice), 28 commits étalés sur la journée, 7 branches `feat/*` mergées via PR. Pas de push direct sur `main`, CI verte sur chaque PR. Détail : `docs/plan.md` §commits.
 
 *« Un postmortem qui dit "tout s'est bien passé" est faux. Pas mensonger : faux. Vous n'avez pas regardé. »* — brief §2.9. Donc on ne dit pas ça. Notre journée n'a pas été parfaite ; elle a été *lucide*, ce qui est l'objectif explicite du brief (§5.4).
