@@ -125,8 +125,7 @@ function Thread({
       for (const message of conversation.messages) {
         try {
           out[message.id] = await decryptFromPeer(
-            identity,
-            conversation.peerPublicKey,
+            conversation.peerPublicKeyX25519,
             message.encrypted,
           );
         } catch {
@@ -153,7 +152,7 @@ function Thread({
     setSending(true);
     setError(null);
     try {
-      const encrypted = await encryptForPeer(identity, conversation.peerPublicKey, draft.trim());
+      const encrypted = await encryptForPeer(conversation.peerPublicKeyX25519, draft.trim());
       const message = await api.createMessage(conversation.id, {
         authorHash: identity.publicHash,
         authorUsername: identity.username,
@@ -183,7 +182,7 @@ function Thread({
             </p>
           </div>
         </div>
-        <Stamp tone="cipher" rotate={-5}>ECDH · AES-GCM</Stamp>
+        <Stamp tone="cipher" rotate={-5}>X25519 · AES-GCM</Stamp>
       </header>
 
       <div ref={scrollRef} className="relative flex-1 space-y-4 overflow-y-auto px-4 py-5 md:px-6">
