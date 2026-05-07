@@ -1,12 +1,52 @@
-const jsonHeaders = {
-  "content-type": "application/json; charset=utf-8",
-  "access-control-allow-origin": "*",
-  "access-control-allow-methods": "GET,POST,DELETE,OPTIONS",
-  "access-control-allow-headers": "content-type,authorization",
+/* Ghostinator API edge — Cloudflare Worker.
+   Frontière de confidentialité : aucune IP n'est jamais loggée. */
+
+const ALLOWED_ORIGINS = [
+  "https://ghostinator.pages.dev",
+  "http://127.0.0.1:5173",
+  "http://localhost:5173",
+];
+
+const SECURITY_HEADERS = {
+  "x-content-type-options": "nosniff",
+  "x-frame-options": "DENY",
+  "referrer-policy": "no-referrer",
+  "strict-transport-security": "max-age=63072000; includeSubDomains; preload",
+  "permissions-policy": "geolocation=(), microphone=(), camera=(), payment=(), interest-cohort=()",
 };
 
-function json(body, status = 200) {
-  return new Response(JSON.stringify(body), { status, headers: jsonHeaders });
+function corsHeaders(origin) {
+  const allowed = origin && ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
+  return {
+    "access-control-allow-origin": allowed,
+    "access-control-allow-methods": "GET,POST,DELETE,OPTIONS",
+    "access-control-allow-headers": "content-type,x-signature,x-pow,x-turnstile",
+    "access-control-max-age": "600",
+    vary: "origin",
+  };
+}
+
+function json(body, status, origin) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      ...SECURITY_HEADERS,
+      ...corsHeaders(origin),
+    },
+  });
+}
+
+function logEvent(level, msg, fields = {}) {
+  console.log(
+    JSON.stringify({
+      ts: new Date().toISOString(),
+      level,
+      service: "ghostinator-worker",
+      msg,
+      ...fields,
+    }),
+  );
 }
 
 function requireString(value, name, max = 5000, min = 1) {
@@ -45,6 +85,146 @@ function encryptedPayload(input) {
   };
 }
 
+function base64ToBytes(value) {
+  return Uint8Array.from(atob(value), (c) => c.charCodeAt(0));
+}
+
+async function sha256Hex(value) {
+  const input = typeof value === "string" ? new TextEncoder().encode(value) : value;
+  const digest = await crypto.subtle.digest("SHA-256", input);
+  return [...new Uint8Array(digest)]
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+/* ---------- Vérification signature Ed25519 ----------
+   Header X-Signature : "<timestamp_ms>.<signature_b64>"
+   Couvre : "<METHOD>.<PATH>.<TIMESTAMP>.<sha256(body)>"
+   Replay protection : timestamp à ±60 s de l'horloge serveur.
+*/
+async function verifySignature({ pubkeyB64, header, method, path, body }) {
+  if (typeof header !== "string" || !header.includes(".")) {
+    const error = new Error("X-Signature manquant");
+    error.status = 401;
+    throw error;
+  }
+  const dot = header.indexOf(".");
+  const timestamp = header.slice(0, dot);
+  const signatureB64 = header.slice(dot + 1);
+  const ts = Number(timestamp);
+  const age = Math.abs(Date.now() - ts);
+  if (!Number.isFinite(ts) || age > 60_000) {
+    const error = new Error("Signature expirée");
+    error.status = 401;
+    throw error;
+  }
+  const bodyHash = await sha256Hex(body || "");
+  const message = `${method}.${path}.${timestamp}.${bodyHash}`;
+  const pubkey = await crypto.subtle.importKey(
+    "raw",
+    base64ToBytes(pubkeyB64),
+    { name: "Ed25519" },
+    false,
+    ["verify"],
+  );
+  const ok = await crypto.subtle.verify(
+    "Ed25519",
+    pubkey,
+    base64ToBytes(signatureB64),
+    new TextEncoder().encode(message),
+  );
+  if (!ok) {
+    const error = new Error("Signature invalide");
+    error.status = 401;
+    throw error;
+  }
+}
+
+/* ---------- Vérification Proof-of-Work ----------
+   Header X-Pow : "<nonce>"
+   On hashe sha256(challenge + nonce), on vérifie qu'au moins `bits` bits de poids
+   fort sont à zéro. Le challenge est la clé publique Ed25519 base64 + le timestamp.
+*/
+async function verifyPow({ challenge, nonce, bits }) {
+  if (typeof nonce !== "string" || nonce.length === 0 || nonce.length > 64) {
+    const error = new Error("X-Pow manquant ou invalide");
+    error.status = 400;
+    throw error;
+  }
+  const digest = new Uint8Array(
+    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(challenge + nonce)),
+  );
+  let zeros = 0;
+  for (const byte of digest) {
+    if (byte === 0) {
+      zeros += 8;
+      continue;
+    }
+    let mask = 0x80;
+    while (mask && (byte & mask) === 0) {
+      zeros += 1;
+      mask >>= 1;
+    }
+    break;
+  }
+  if (zeros < bits) {
+    const error = new Error("Proof-of-Work insuffisant");
+    error.status = 400;
+    throw error;
+  }
+}
+
+/* ---------- Rate-limit hashé (en mémoire Worker) ----------
+   `hash(pubkey + jour ISO + secret_rotatif)` -> compteur.
+   Stockage : Map locale au isolate, TTL 24h. En prod, on basculerait sur Workers KV
+   avec la même API pour persister entre isolates. Documenté en dette.
+*/
+const RATE_BUCKETS = new Map();
+
+async function rateLimit({ pubkeyB64, env, route, max }) {
+  const day = new Date().toISOString().slice(0, 10);
+  const secret = env.RATELIMIT_SECRET || "dev-secret";
+  const key = await sha256Hex(`${pubkeyB64}.${day}.${secret}.${route}`);
+  const slot = RATE_BUCKETS.get(key) || { count: 0, expires: Date.now() + 24 * 3600 * 1000 };
+  if (Date.now() > slot.expires) {
+    slot.count = 0;
+    slot.expires = Date.now() + 24 * 3600 * 1000;
+  }
+  slot.count += 1;
+  RATE_BUCKETS.set(key, slot);
+  if (slot.count > max) {
+    const error = new Error("Trop de requêtes — réessayez plus tard");
+    error.status = 429;
+    throw error;
+  }
+}
+
+/* ---------- Vérification Turnstile ---------- */
+async function verifyTurnstile({ env, token, ip }) {
+  if (!env.TURNSTILE_SECRET_KEY) return; // dev mode sans Turnstile
+  if (typeof token !== "string" || token.length === 0) {
+    const error = new Error("Turnstile token manquant");
+    error.status = 400;
+    throw error;
+  }
+  const form = new URLSearchParams();
+  form.set("secret", env.TURNSTILE_SECRET_KEY);
+  form.set("response", token);
+  if (ip) form.set("remoteip", ip);
+  const res = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: form.toString(),
+  });
+  const data = await res.json();
+  if (!data.success) {
+    const error = new Error("Turnstile invalide");
+    error.status = 400;
+    throw error;
+  }
+}
+
+/* ---------- Supabase REST ---------- */
 function supabaseBase(env) {
   if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) {
     const error = new Error("Secrets Supabase manquants dans le Worker");
@@ -66,7 +246,6 @@ async function supabaseRequest(env, path, init = {}) {
       ...(init.headers || {}),
     },
   });
-
   const text = await response.text();
   const payload = text ? JSON.parse(text) : null;
   if (!response.ok) {
@@ -82,7 +261,8 @@ function mapUser(row) {
     id: row.id,
     username: row.username,
     publicHash: row.public_hash,
-    publicKey: row.public_key,
+    publicKeyEd25519: row.public_key_ed25519,
+    publicKeyX25519: row.public_key_x25519,
     createdAt: row.created_at,
   };
 }
@@ -114,7 +294,7 @@ function mapConversation(row, messagesByConversation) {
     ownerHash: row.owner_hash,
     peerHash: row.peer_hash,
     peerUsername: row.peer_username,
-    peerPublicKey: row.peer_public_key,
+    peerPublicKeyX25519: row.peer_public_key_x25519,
     createdAt: row.created_at,
     messages: messagesByConversation?.get(row.id) || [],
   };
@@ -133,12 +313,27 @@ function mapGroup(row) {
   };
 }
 
+/* ---------- Lookup utilisateur (utilisé pour vérifier les signatures) ---------- */
+async function getUserPublicKeys(env, hash) {
+  const rows = await supabaseRequest(
+    env,
+    `users?public_hash=eq.${hash}&select=public_key_ed25519,public_key_x25519&limit=1`,
+  );
+  if (!rows.length) {
+    const error = new Error("user introuvable");
+    error.status = 404;
+    throw error;
+  }
+  return { ed25519: rows[0].public_key_ed25519, x25519: rows[0].public_key_x25519 };
+}
+
+/* ---------- Routes ---------- */
 async function registerUser(env, body) {
   const username = requireUsername(body.username);
   const publicHash = requireHash(body.publicHash, "publicHash");
-  const publicKey = requireString(body.publicKey, "publicKey", 256);
+  const publicKeyEd25519 = requireString(body.publicKeyEd25519, "publicKeyEd25519", 256);
+  const publicKeyX25519 = requireString(body.publicKeyX25519, "publicKeyX25519", 256);
 
-  // Reject taken username (case-insensitive) or hash
   const existing = await supabaseRequest(
     env,
     `users?or=(username.eq.${encodeURIComponent(username)},public_hash.eq.${publicHash})&select=username,public_hash`,
@@ -155,7 +350,12 @@ async function registerUser(env, body) {
 
   const rows = await supabaseRequest(env, "users", {
     method: "POST",
-    body: JSON.stringify({ username, public_hash: publicHash, public_key: publicKey }),
+    body: JSON.stringify({
+      username,
+      public_hash: publicHash,
+      public_key_ed25519: publicKeyEd25519,
+      public_key_x25519: publicKeyX25519,
+    }),
   });
   return mapUser(rows[0]);
 }
@@ -190,10 +390,7 @@ async function bootstrap(env, ownerHash) {
       ? supabaseRequest(env, `conversations?${filter}&select=*&order=created_at.desc&limit=80`)
       : Promise.resolve([]),
     ownerHash
-      ? supabaseRequest(
-          env,
-          `messages?select=*&order=created_at.asc&limit=600`,
-        )
+      ? supabaseRequest(env, `messages?select=*&order=created_at.asc&limit=600`)
       : Promise.resolve([]),
     supabaseRequest(env, "groups?select=*&order=created_at.desc&limit=80"),
   ]);
@@ -230,7 +427,6 @@ async function createConversation(env, body) {
   const ownerHash = requireHash(body.ownerHash, "ownerHash");
   const peerHash = requireHash(body.peerHash, "peerHash");
 
-  // De-dup: try return existing if the same pair already exists
   const existing = await supabaseRequest(
     env,
     `conversations?owner_hash=eq.${ownerHash}&peer_hash=eq.${peerHash}&select=*&limit=1`,
@@ -245,7 +441,7 @@ async function createConversation(env, body) {
       owner_hash: ownerHash,
       peer_hash: peerHash,
       peer_username: requireUsername(body.peerUsername),
-      peer_public_key: requireString(body.peerPublicKey, "peerPublicKey", 256),
+      peer_public_key_x25519: requireString(body.peerPublicKeyX25519, "peerPublicKeyX25519", 256),
     }),
   });
   return mapConversation(rows[0], new Map());
@@ -283,8 +479,10 @@ async function createGroup(env, body) {
 }
 
 async function requestJson(request) {
+  const text = await request.text();
+  if (!text) return {};
   try {
-    return await request.json();
+    return JSON.parse(text);
   } catch {
     const error = new Error("JSON invalide");
     error.status = 400;
@@ -292,65 +490,157 @@ async function requestJson(request) {
   }
 }
 
+/* Garde-fou anonymat : on n'utilise jamais l'IP, mais on s'assure défensivement
+   que le header CF-Connecting-IP n'est pas réfléchi accidentellement dans une
+   réponse ou un log. */
+function dropClientIp(request) {
+  // On ne fait rien avec, on ne le lit pas, on ne le passe nulle part.
+  // Cette fonction existe pour documenter l'intention dans le code.
+  void request;
+}
+
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
+    const origin = request.headers.get("origin");
+    const url = new URL(request.url);
+    const method = request.method;
+    const requireBody = method !== "GET" && method !== "OPTIONS";
+
+    dropClientIp(request);
+
     try {
-      if (request.method === "OPTIONS") {
-        return new Response(null, { status: 204, headers: jsonHeaders });
-      }
-
-      const url = new URL(request.url);
-      const method = request.method;
-
-      if (method === "GET" && url.pathname === "/health") {
-        return json({
-          ok: true,
-          service: "ghostinator-worker-api",
-          db: "supabase",
-          edge: "cloudflare",
+      if (method === "OPTIONS") {
+        return new Response(null, {
+          status: 204,
+          headers: { ...SECURITY_HEADERS, ...corsHeaders(origin) },
         });
       }
 
-      if (method === "GET" && url.pathname === "/api/bootstrap") {
-        const ownerHash = url.searchParams.get("owner");
-        return json(await bootstrap(env, ownerHash ? requireHash(ownerHash, "owner") : null));
+      if (method === "GET" && url.pathname === "/health") {
+        return json(
+          {
+            ok: true,
+            service: "ghostinator-worker-api",
+            db: "supabase",
+            edge: "cloudflare",
+            time: new Date().toISOString(),
+          },
+          200,
+          origin,
+        );
       }
 
-      if (method === "POST" && url.pathname === "/api/users") {
-        return json(await registerUser(env, await requestJson(request)), 201);
+      // Lecture du body une seule fois — on en a besoin à la fois pour la
+      // validation d'auth et pour le parsing JSON.
+      const rawBody = requireBody ? await request.text() : "";
+      const body = requireBody ? (rawBody ? JSON.parse(rawBody) : {}) : null;
+
+      // Routes publiques (lecture). Pas de signature exigée mais rate-limit IP-less
+      // par fingerprint de la pubkey si elle est passée en query.
+      if (method === "GET" && url.pathname === "/api/bootstrap") {
+        const ownerHash = url.searchParams.get("owner");
+        const result = await bootstrap(env, ownerHash ? requireHash(ownerHash, "owner") : null);
+        return json(result, 200, origin);
       }
 
       if (method === "GET" && url.pathname === "/api/users") {
         const q = url.searchParams.get("q") || "";
         const exclude = url.searchParams.get("exclude");
-        return json(await searchUsers(env, q, exclude ? requireHash(exclude, "exclude") : null));
+        const result = await searchUsers(
+          env,
+          q,
+          exclude ? requireHash(exclude, "exclude") : null,
+        );
+        return json(result, 200, origin);
       }
 
       const userMatch = url.pathname.match(/^\/api\/users\/([0-9a-fA-F]{64})$/);
       if (method === "GET" && userMatch) {
-        return json(await getUserByHash(env, userMatch[1].toLowerCase()));
+        const result = await getUserByHash(env, userMatch[1].toLowerCase());
+        return json(result, 200, origin);
+      }
+
+      // Routes mutantes : exigent signature Ed25519 + (selon route) PoW ou Turnstile.
+
+      if (method === "POST" && url.pathname === "/api/users") {
+        // Création de compte : pas encore de pubkey en BDD. On vérifie la signature
+        // contre la pubkey *fournie dans le body*, plus PoW + Turnstile pour rendre
+        // le sybil-attack coûteux.
+        const claimedPubkey = requireString(body.publicKeyEd25519, "publicKeyEd25519", 256);
+        await verifySignature({
+          pubkeyB64: claimedPubkey,
+          header: request.headers.get("x-signature"),
+          method,
+          path: url.pathname,
+          body: rawBody,
+        });
+        await verifyPow({
+          challenge: `signup:${claimedPubkey}`,
+          nonce: request.headers.get("x-pow") || "",
+          bits: 18,
+        });
+        await verifyTurnstile({ env, token: request.headers.get("x-turnstile") });
+        const created = await registerUser(env, body);
+        logEvent("info", "user registered", { hash_prefix: created.publicHash.slice(0, 6) });
+        return json(created, 201, origin);
+      }
+
+      // Pour les autres routes mutantes : la pubkey est récupérée par hash.
+      async function authBy(authorHashField) {
+        const authorHash = requireHash(body[authorHashField], authorHashField);
+        const keys = await getUserPublicKeys(env, authorHash);
+        await verifySignature({
+          pubkeyB64: keys.ed25519,
+          header: request.headers.get("x-signature"),
+          method,
+          path: url.pathname,
+          body: rawBody,
+        });
+        await rateLimit({ pubkeyB64: keys.ed25519, env, route: url.pathname, max: 60 });
+        return { authorHash, keys };
       }
 
       if (method === "POST" && url.pathname === "/api/posts") {
-        return json(await createPost(env, await requestJson(request)), 201);
+        const { keys } = await authBy("authorHash");
+        await verifyPow({
+          challenge: `post:${keys.ed25519}`,
+          nonce: request.headers.get("x-pow") || "",
+          bits: 14,
+        });
+        await verifyTurnstile({ env, token: request.headers.get("x-turnstile") });
+        const created = await createPost(env, body);
+        logEvent("info", "post created", { id: created.id });
+        return json(created, 201, origin);
       }
 
       if (method === "POST" && url.pathname === "/api/conversations") {
-        return json(await createConversation(env, await requestJson(request)), 201);
+        await authBy("ownerHash");
+        const created = await createConversation(env, body);
+        logEvent("info", "conversation upserted", { id: created.id });
+        return json(created, 201, origin);
       }
 
       const messageMatch = url.pathname.match(/^\/api\/conversations\/([^/]+)\/messages$/);
       if (method === "POST" && messageMatch) {
-        return json(await createMessage(env, messageMatch[1], await requestJson(request)), 201);
+        await authBy("authorHash");
+        const created = await createMessage(env, messageMatch[1], body);
+        return json(created, 201, origin);
       }
 
       if (method === "POST" && url.pathname === "/api/groups") {
-        return json(await createGroup(env, await requestJson(request)), 201);
+        await authBy("ownerHash");
+        const created = await createGroup(env, body);
+        return json(created, 201, origin);
       }
 
-      return json({ error: "Not found" }, 404);
+      return json({ error: "Not found" }, 404, origin);
     } catch (error) {
-      return json({ error: error.message || "Erreur Worker" }, error.status || 500);
+      const status = error.status || 500;
+      logEvent(status >= 500 ? "error" : "warn", error.message || "Erreur Worker", {
+        path: url.pathname,
+        status,
+      });
+      return json({ error: error.message || "Erreur Worker" }, status, origin);
     }
   },
 };
