@@ -1,0 +1,212 @@
+vars: {
+  d2-config: {
+    layout-engine: elk
+    theme-id: 200
+    sketch: false
+    pad: 40
+  }
+}
+
+title: |md
+  # Ghost Social — Architecture
+  ## Anonyme, bootstrappé, scalable
+| {
+  near: top-center
+  style: {
+    font-size: 24
+    bold: true
+  }
+}
+
+user: Utilisateur (PWA) {
+  shape: person
+  style: {
+    fill: "#e0f2fe"
+    stroke: "#0369a1"
+    stroke-width: 2
+  }
+  tooltip: |md
+    **Côté client**
+    - Keypair Ed25519 générée dans le navigateur
+    - Clé privée en IndexedDB chiffrée
+    - Mnémonique BIP-39 12 mots pour backup
+    - Signe chaque requête (pas d'identifiant serveur)
+  |
+}
+
+cloudflare: Cloudflare Edge (gratuit, illimité) {
+  style: {
+    fill: "#fff7ed"
+    stroke: "#f97316"
+    stroke-width: 2
+    border-radius: 12
+  }
+
+  proxy: Proxy + WAF + DDoS {
+    shape: rectangle
+    style.fill: "#ffedd5"
+    tooltip: "Retire CF-Connecting-IP via Managed Transform.\nL'origin ne reçoit JAMAIS d'IP client."
+  }
+
+  turnstile: Turnstile {
+    shape: rectangle
+    style.fill: "#ffedd5"
+    tooltip: "CAPTCHA sans cookie, sans fingerprint.\nRGPD/ePrivacy/CCPA compliant.\nIllimité gratuit."
+  }
+
+  pages: Pages (PWA hosting) {
+    shape: rectangle
+    style.fill: "#ffedd5"
+    tooltip: "Bandwidth illimité gratuit.\nRequêtes static illimitées."
+  }
+
+  workers: Workers {
+    shape: rectangle
+    style.fill: "#ffedd5"
+    tooltip: |md
+      - Vérif signature Ed25519 (auth sans identité)
+      - Rate-limit par hash(pubkey+jour+secret_rotatif)
+      - Proof-of-Work léger anti-spam
+      - Strip EXIF des images avant upload R2
+      - Cold start <1 ms moyen (V8 isolates)
+    |
+  }
+}
+
+supabase: Supabase (free tier) {
+  style: {
+    fill: "#ecfdf5"
+    stroke: "#059669"
+    stroke-width: 2
+  }
+
+  postgres: Postgres 500 MB {
+    shape: cylinder
+    style.fill: "#d1fae5"
+    tooltip: "Row-Level Security sur author_pubkey_hash.\nAucune PII, aucun email, aucun téléphone."
+  }
+
+  realtime: Realtime (WebSockets) {
+    shape: rectangle
+    style.fill: "#d1fae5"
+  }
+
+  supavisor: Supavisor (pooler) {
+    shape: rectangle
+    style.fill: "#d1fae5"
+    tooltip: "Inclus gratuit sur tous les projets.\nScale à des millions de connexions."
+  }
+}
+
+r2: Cloudflare R2 (free tier) {
+  shape: cylinder
+  style: {
+    fill: "#fef3c7"
+    stroke: "#d97706"
+    stroke-width: 2
+  }
+  tooltip: "10 GB gratuit.\nEgress = 0 EUR, toujours.\nAPI S3-compatible.\nMédias post-stripping EXIF."
+}
+
+observability: Observabilité privacy-first {
+  style: {
+    fill: "#f5f3ff"
+    stroke: "#7c3aed"
+    stroke-width: 2
+  }
+
+  analytics: Cloudflare Web Analytics {
+    shape: rectangle
+    style.fill: "#ede9fe"
+    tooltip: "Pas de cookie, pas de fingerprint.\nGratuit."
+  }
+
+  grafana: Grafana Cloud Free {
+    shape: rectangle
+    style.fill: "#ede9fe"
+    tooltip: "10k séries + 50 GB logs + 14j rétention.\nCompteurs agrégés uniquement."
+  }
+
+  glitchtip: GlitchTip (self-hosted) {
+    shape: rectangle
+    style.fill: "#ede9fe"
+    tooltip: "Fork open-source de Sentry.\nSDK Sentry compatibles.\nScrubbing agressif des PII."
+  }
+}
+
+user -> cloudflare.proxy: "HTTPS + requête signée" {
+  style.stroke: "#0369a1"
+  style.stroke-width: 2
+}
+
+cloudflare.proxy -> cloudflare.workers: "IP strippée" {
+  style.stroke: "#dc2626"
+  style.stroke-width: 2
+  style.bold: true
+}
+
+cloudflare.pages -> user: "PWA statique" {
+  style.stroke: "#f97316"
+  style.stroke-dash: 4
+}
+
+cloudflare.turnstile -> cloudflare.workers: "token anonyme" {
+  style.stroke: "#f97316"
+  style.stroke-dash: 3
+}
+
+cloudflare.workers -> supabase.supavisor: "SQL (RLS)" {
+  style.stroke: "#059669"
+  style.stroke-width: 2
+}
+
+supabase.supavisor -> supabase.postgres: ""
+supabase.postgres -> supabase.realtime: "WAL"
+
+supabase.realtime -> user: "WebSocket push (feed)" {
+  style.stroke: "#059669"
+  style.stroke-dash: 4
+}
+
+cloudflare.workers -> r2: "PUT media (EXIF strippé)" {
+  style.stroke: "#d97706"
+  style.stroke-width: 2
+}
+
+r2 -> user: "GET media (egress = 0€)" {
+  style.stroke: "#d97706"
+  style.stroke-dash: 4
+  style.bold: true
+}
+
+cloudflare.workers -> observability.glitchtip: "erreurs (sans PII)" {
+  style.stroke: "#7c3aed"
+  style.stroke-dash: 3
+  style.opacity: 0.6
+}
+
+cloudflare.workers -> observability.grafana: "métriques agrégées" {
+  style.stroke: "#7c3aed"
+  style.stroke-dash: 3
+  style.opacity: 0.6
+}
+
+cloudflare.pages -> observability.analytics: "page views anonymes" {
+  style.stroke: "#7c3aed"
+  style.stroke-dash: 3
+  style.opacity: 0.6
+}
+
+legend: |md
+  **Légende**
+  - Trait plein : requête synchrone
+  - Trait pointillé : asynchrone / pull
+  - Rouge : frontière où l'IP client est **définitivement perdue**
+  - 0 € / mois jusqu'à ~10k MAU
+| {
+  near: bottom-center
+  style: {
+    fill: "#f9fafb"
+    stroke: "#6b7280"
+  }
+}
