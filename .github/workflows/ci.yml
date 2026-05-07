@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  ci:
+    name: lint + build + tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Type-check (TypeScript strict)
+        run: bun run lint
+
+      - name: Build (vite + tsc)
+        run: bun run build
+
+      - name: Tests unitaires (crypto, PoW, AES-GCM)
+        run: bun run test:unit
+
+      - name: Test E2E (story critique signup + DM E2EE)
+        run: bun run test:e2e
+
+      - name: Audit dépendances (avertissement seulement)
+        run: bun pm audit || true
+        continue-on-error: true
