@@ -1,6 +1,7 @@
 node_modules/
 dist/
 data/
+coverage/
 .env
 .env.local
 .env.*.local
@@ -8,3 +9,7 @@ data/
 .dev.vars
 *.log
 *.tsbuildinfo
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
