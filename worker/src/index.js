@@ -1,7 +1,7 @@
 const jsonHeaders = {
   "content-type": "application/json; charset=utf-8",
   "access-control-allow-origin": "*",
-  "access-control-allow-methods": "GET,POST,OPTIONS",
+  "access-control-allow-methods": "GET,POST,DELETE,OPTIONS",
   "access-control-allow-headers": "content-type,authorization",
 };
 
@@ -9,13 +9,33 @@ function json(body, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: jsonHeaders });
 }
 
-function requireString(value, name, max = 5000) {
-  if (typeof value !== "string" || value.trim().length === 0 || value.length > max) {
+function requireString(value, name, max = 5000, min = 1) {
+  if (typeof value !== "string" || value.trim().length < min || value.length > max) {
     const error = new Error(`${name} invalide`);
     error.status = 400;
     throw error;
   }
   return value.trim();
+}
+
+function requireUsername(value) {
+  const username = requireString(value, "username", 32, 2);
+  if (!/^[a-zA-Z0-9_.\-]+$/.test(username)) {
+    const error = new Error("username invalide (a-z 0-9 _ . - autorisés)");
+    error.status = 400;
+    throw error;
+  }
+  return username;
+}
+
+function requireHash(value, name = "hash") {
+  const hash = requireString(value, name, 64, 64);
+  if (!/^[0-9a-fA-F]{64}$/.test(hash)) {
+    const error = new Error(`${name} invalide`);
+    error.status = 400;
+    throw error;
+  }
+  return hash.toLowerCase();
 }
 
 function encryptedPayload(input) {
@@ -57,10 +77,20 @@ async function supabaseRequest(env, path, init = {}) {
   return payload;
 }
 
+function mapUser(row) {
+  return {
+    id: row.id,
+    username: row.username,
+    publicHash: row.public_hash,
+    publicKey: row.public_key,
+    createdAt: row.created_at,
+  };
+}
+
 function mapPost(row) {
   return {
     id: row.id,
-    authorHandle: row.author_handle,
+    authorUsername: row.author_username,
     authorHash: row.author_hash,
     body: row.body,
     replies: row.replies,
@@ -72,7 +102,7 @@ function mapMessage(row) {
   return {
     id: row.id,
     authorHash: row.author_hash,
-    authorHandle: row.author_handle,
+    authorUsername: row.author_username,
     encrypted: { iv: row.iv, cipher: row.cipher },
     createdAt: row.created_at,
   };
@@ -82,10 +112,11 @@ function mapConversation(row, messagesByConversation) {
   return {
     id: row.id,
     ownerHash: row.owner_hash,
-    peerHandle: row.peer_handle,
     peerHash: row.peer_hash,
+    peerUsername: row.peer_username,
+    peerPublicKey: row.peer_public_key,
     createdAt: row.created_at,
-    messages: messagesByConversation.get(row.id) || [],
+    messages: messagesByConversation?.get(row.id) || [],
   };
 }
 
@@ -93,6 +124,7 @@ function mapGroup(row) {
   return {
     id: row.id,
     ownerHash: row.owner_hash,
+    ownerUsername: row.owner_username,
     name: row.name,
     topic: row.topic,
     encryptedIntro: { iv: row.intro_iv, cipher: row.intro_cipher },
@@ -101,16 +133,75 @@ function mapGroup(row) {
   };
 }
 
-async function bootstrap(env) {
+async function registerUser(env, body) {
+  const username = requireUsername(body.username);
+  const publicHash = requireHash(body.publicHash, "publicHash");
+  const publicKey = requireString(body.publicKey, "publicKey", 256);
+
+  // Reject taken username (case-insensitive) or hash
+  const existing = await supabaseRequest(
+    env,
+    `users?or=(username.eq.${encodeURIComponent(username)},public_hash.eq.${publicHash})&select=username,public_hash`,
+  );
+  if (existing.length) {
+    const error = new Error(
+      existing.some((row) => row.username?.toLowerCase() === username.toLowerCase())
+        ? "username déjà pris"
+        : "clé déjà enregistrée",
+    );
+    error.status = 409;
+    throw error;
+  }
+
+  const rows = await supabaseRequest(env, "users", {
+    method: "POST",
+    body: JSON.stringify({ username, public_hash: publicHash, public_key: publicKey }),
+  });
+  return mapUser(rows[0]);
+}
+
+async function searchUsers(env, query, excludeHash) {
+  const trimmed = (query || "").trim().slice(0, 32);
+  if (!trimmed) return [];
+  const filter = `username=ilike.*${encodeURIComponent(trimmed)}*`;
+  const exclusion = excludeHash ? `&public_hash=neq.${excludeHash}` : "";
+  const rows = await supabaseRequest(
+    env,
+    `users?${filter}${exclusion}&select=*&order=username.asc&limit=20`,
+  );
+  return rows.map(mapUser);
+}
+
+async function getUserByHash(env, hash) {
+  const rows = await supabaseRequest(env, `users?public_hash=eq.${hash}&select=*&limit=1`);
+  if (!rows.length) {
+    const error = new Error("user introuvable");
+    error.status = 404;
+    throw error;
+  }
+  return mapUser(rows[0]);
+}
+
+async function bootstrap(env, ownerHash) {
+  const filter = ownerHash ? `or=(owner_hash.eq.${ownerHash},peer_hash.eq.${ownerHash})` : "limit=0";
   const [posts, conversations, messages, groups] = await Promise.all([
     supabaseRequest(env, "posts?select=*&order=created_at.desc&limit=80"),
-    supabaseRequest(env, "conversations?select=*&order=created_at.desc&limit=80"),
-    supabaseRequest(env, "messages?select=*&order=created_at.asc&limit=600"),
+    ownerHash
+      ? supabaseRequest(env, `conversations?${filter}&select=*&order=created_at.desc&limit=80`)
+      : Promise.resolve([]),
+    ownerHash
+      ? supabaseRequest(
+          env,
+          `messages?select=*&order=created_at.asc&limit=600`,
+        )
+      : Promise.resolve([]),
     supabaseRequest(env, "groups?select=*&order=created_at.desc&limit=80"),
   ]);
 
+  const conversationIds = new Set(conversations.map((row) => row.id));
   const messagesByConversation = new Map();
   messages.forEach((row) => {
+    if (!conversationIds.has(row.conversation_id)) return;
     const list = messagesByConversation.get(row.conversation_id) || [];
     list.push(mapMessage(row));
     messagesByConversation.set(row.conversation_id, list);
@@ -127,8 +218,8 @@ async function createPost(env, body) {
   const rows = await supabaseRequest(env, "posts", {
     method: "POST",
     body: JSON.stringify({
-      author_handle: requireString(body.authorHandle, "authorHandle", 80),
-      author_hash: requireString(body.authorHash, "authorHash", 128),
+      author_username: requireUsername(body.authorUsername),
+      author_hash: requireHash(body.authorHash, "authorHash"),
       body: requireString(body.body, "body", 280),
     }),
   });
@@ -136,12 +227,25 @@ async function createPost(env, body) {
 }
 
 async function createConversation(env, body) {
+  const ownerHash = requireHash(body.ownerHash, "ownerHash");
+  const peerHash = requireHash(body.peerHash, "peerHash");
+
+  // De-dup: try return existing if the same pair already exists
+  const existing = await supabaseRequest(
+    env,
+    `conversations?owner_hash=eq.${ownerHash}&peer_hash=eq.${peerHash}&select=*&limit=1`,
+  );
+  if (existing.length) {
+    return mapConversation(existing[0], new Map());
+  }
+
   const rows = await supabaseRequest(env, "conversations", {
     method: "POST",
     body: JSON.stringify({
-      owner_hash: requireString(body.ownerHash, "ownerHash", 128),
-      peer_handle: requireString(body.peerHandle, "peerHandle", 80),
-      peer_hash: requireString(body.peerHash, "peerHash", 128),
+      owner_hash: ownerHash,
+      peer_hash: peerHash,
+      peer_username: requireUsername(body.peerUsername),
+      peer_public_key: requireString(body.peerPublicKey, "peerPublicKey", 256),
     }),
   });
   return mapConversation(rows[0], new Map());
@@ -153,8 +257,8 @@ async function createMessage(env, conversationId, body) {
     method: "POST",
     body: JSON.stringify({
       conversation_id: conversationId,
-      author_hash: requireString(body.authorHash, "authorHash", 128),
-      author_handle: requireString(body.authorHandle, "authorHandle", 80),
+      author_hash: requireHash(body.authorHash, "authorHash"),
+      author_username: requireUsername(body.authorUsername),
       iv: encrypted.iv,
       cipher: encrypted.cipher,
     }),
@@ -167,7 +271,8 @@ async function createGroup(env, body) {
   const rows = await supabaseRequest(env, "groups", {
     method: "POST",
     body: JSON.stringify({
-      owner_hash: requireString(body.ownerHash, "ownerHash", 128),
+      owner_hash: requireHash(body.ownerHash, "ownerHash"),
+      owner_username: requireUsername(body.ownerUsername),
       name: requireString(body.name, "name", 80),
       topic: requireString(body.topic, "topic", 180),
       intro_iv: encryptedIntro.iv,
@@ -198,11 +303,32 @@ export default {
       const method = request.method;
 
       if (method === "GET" && url.pathname === "/health") {
-        return json({ ok: true, service: "ghostinator-worker-api", db: "supabase", edge: "cloudflare" });
+        return json({
+          ok: true,
+          service: "ghostinator-worker-api",
+          db: "supabase",
+          edge: "cloudflare",
+        });
       }
 
       if (method === "GET" && url.pathname === "/api/bootstrap") {
-        return json(await bootstrap(env));
+        const ownerHash = url.searchParams.get("owner");
+        return json(await bootstrap(env, ownerHash ? requireHash(ownerHash, "owner") : null));
+      }
+
+      if (method === "POST" && url.pathname === "/api/users") {
+        return json(await registerUser(env, await requestJson(request)), 201);
+      }
+
+      if (method === "GET" && url.pathname === "/api/users") {
+        const q = url.searchParams.get("q") || "";
+        const exclude = url.searchParams.get("exclude");
+        return json(await searchUsers(env, q, exclude ? requireHash(exclude, "exclude") : null));
+      }
+
+      const userMatch = url.pathname.match(/^\/api\/users\/([0-9a-fA-F]{64})$/);
+      if (method === "GET" && userMatch) {
+        return json(await getUserByHash(env, userMatch[1].toLowerCase()));
       }
 
       if (method === "POST" && url.pathname === "/api/posts") {
