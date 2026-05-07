@@ -122,6 +122,41 @@ create policy "public can read groups metadata"
   on public.groups for select
   using (true);
 
--- Pas de policy publique sur conversations / messages : seul le service role
--- y accède, après vérification de la signature Ed25519 par le Worker / Express.
--- Les écritures sur toutes les tables passent aussi par le service role.
+-- Conversations / messages : SELECT publique pour permettre les abonnements
+-- Realtime côté client. Le contenu reste E2EE (X25519+AES-GCM) — sans la clé
+-- privée du destinataire, le cipher est inutilisable. Trade-off métadonnée
+-- explicité dans docs/tensions.md (§Tension 5). Les ÉCRITURES restent bloquées,
+-- elles ne passent que par le service role via le Worker (vérification Ed25519).
+drop policy if exists "public can read messages metadata" on public.messages;
+create policy "public can read messages metadata"
+  on public.messages for select
+  using (true);
+
+drop policy if exists "public can read conversations metadata" on public.conversations;
+create policy "public can read conversations metadata"
+  on public.conversations for select
+  using (true);
+
+-- Activer Realtime (publication logique) sur les tables où le push est utile.
+-- idempotent : ne ré-ajoute pas si déjà présent.
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'messages'
+  ) then
+    alter publication supabase_realtime add table public.messages;
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'posts'
+  ) then
+    alter publication supabase_realtime add table public.posts;
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'conversations'
+  ) then
+    alter publication supabase_realtime add table public.conversations;
+  end if;
+end$$;

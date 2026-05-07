@@ -9,13 +9,16 @@ import { SearchPanel } from "./components/Search";
 import * as api from "./lib/api";
 import {
   activateIdentity,
+  clearSession,
   deactivateIdentity,
   detectCurve25519Support,
   ensureCrypto,
   forgetIdentity,
   hasStoredIdentity,
+  tryAutoUnlock,
   unlockIdentity,
 } from "./lib/crypto";
+import { isRealtimeEnabled, subscribeBootstrap } from "./lib/realtime";
 import type {
   Conversation,
   Group,
@@ -66,7 +69,19 @@ export default function App() {
       }
       const stored = await hasStoredIdentity();
       if (cancelled) return;
-      setStage(stored ? "unlock" : "onboard");
+      if (!stored) {
+        setStage("onboard");
+        return;
+      }
+      // Tentative de déverrouillage automatique via session courte (1h sliding).
+      const cached = await tryAutoUnlock();
+      if (cancelled) return;
+      if (cached) {
+        await activateIdentity(cached);
+        await enter(cached);
+        return;
+      }
+      setStage("unlock");
     }
     boot();
     return () => {
@@ -117,6 +132,42 @@ export default function App() {
     }
   }
 
+  /* Realtime : push WebSocket des INSERT messages, posts, conversations.
+     Filtrage côté consommateur : on n'ajoute un message que si la conv est
+     déjà dans notre state (donc « concerne » l'utilisateur). */
+  useEffect(() => {
+    if (!identity || stage !== "ready") return;
+    if (!isRealtimeEnabled()) return;
+    const knownConversationIds = new Set(conversations.map((c) => c.id));
+    const unsubscribe = subscribeBootstrap({
+      ownerHash: identity.publicHash,
+      onPost: (post) => {
+        setPosts((items) => (items.find((p) => p.id === post.id) ? items : [post, ...items]));
+      },
+      onMessage: (conversationId, message) => {
+        if (!knownConversationIds.has(conversationId)) return;
+        setConversations((items) =>
+          items.map((c) =>
+            c.id === conversationId
+              ? c.messages.find((m) => m.id === message.id)
+                ? c
+                : { ...c, messages: [...c.messages, message] }
+              : c,
+          ),
+        );
+      },
+      onConversation: (conv) => {
+        knownConversationIds.add(conv.id);
+        setConversations((items) =>
+          items.find((c) => c.id === conv.id) ? items : [conv, ...items],
+        );
+      },
+    });
+    return () => unsubscribe();
+    // On ré-abonne quand la liste de conversations change pour rafraîchir le filtre INSERT messages.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [identity, stage, conversations.length]);
+
   function navigate(next: View) {
     window.location.hash = next;
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -141,6 +192,7 @@ export default function App() {
 
   async function logout() {
     await forgetIdentity();
+    clearSession();
     deactivateIdentity();
     setIdentity(null);
     setPosts([]);

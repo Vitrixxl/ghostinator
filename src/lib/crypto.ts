@@ -164,6 +164,7 @@ export async function persistIdentity(identity: Identity, password: string) {
   const blob = await encryptIdentityBlob(identity, password);
   await saveEncryptedIdentity(blob);
   sessionPassword = password;
+  cacheSessionPassword(password);
 }
 
 export async function unlockIdentity(password: string): Promise<Identity | null> {
@@ -172,10 +173,68 @@ export async function unlockIdentity(password: string): Promise<Identity | null>
   try {
     const identity = await decryptIdentityBlob(blob, password);
     sessionPassword = password;
+    cacheSessionPassword(password);
     return identity;
   } catch {
     return null; // mauvais mot de passe ou blob corrompu
   }
+}
+
+/* ---------- session courte (auto-unlock après reload) ----------
+   On garde le mot de passe local en sessionStorage pendant un délai (1h
+   par défaut, sliding window). sessionStorage = même origine, même onglet.
+   Trade-off : un attaquant XSS peut le lire — mais s'il a XSS, il peut déjà
+   exfiltrer la clé en mémoire JS et tout le state. Donc même surface. */
+
+const SESSION_KEY = "ghostinator:session:v1";
+const SESSION_TTL_MS = 60 * 60 * 1000; // 1h
+
+type SessionBlob = { password: string; expires: number };
+
+function cacheSessionPassword(password: string, ttlMs: number = SESSION_TTL_MS) {
+  try {
+    const blob: SessionBlob = { password, expires: Date.now() + ttlMs };
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify(blob));
+  } catch {
+    /* sessionStorage indisponible (ex: navigation privée Safari) */
+  }
+}
+
+function readCachedPassword(): string | null {
+  try {
+    const raw = sessionStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    const blob = JSON.parse(raw) as SessionBlob;
+    if (!blob.password || !blob.expires || Date.now() > blob.expires) {
+      sessionStorage.removeItem(SESSION_KEY);
+      return null;
+    }
+    // Sliding window : on prolonge à chaque accès.
+    cacheSessionPassword(blob.password);
+    return blob.password;
+  } catch {
+    return null;
+  }
+}
+
+function clearCachedPassword() {
+  try {
+    sessionStorage.removeItem(SESSION_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Tente de déverrouiller automatiquement avec le mot de passe en sessionStorage.
+ *  Retourne null si pas de session ou si le mot de passe est invalide. */
+export async function tryAutoUnlock(): Promise<Identity | null> {
+  const password = readCachedPassword();
+  if (!password) return null;
+  return unlockIdentity(password);
+}
+
+export function clearSession() {
+  clearCachedPassword();
 }
 
 export async function hasStoredIdentity(): Promise<boolean> {
@@ -185,6 +244,7 @@ export async function hasStoredIdentity(): Promise<boolean> {
 
 export async function forgetIdentity() {
   await clearEncryptedIdentity();
+  clearCachedPassword();
   deactivateIdentity();
 }
 
