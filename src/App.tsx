@@ -7,7 +7,15 @@ import { Shell, View } from "./components/Layout";
 import { Onboarding } from "./components/Onboarding";
 import { SearchPanel } from "./components/Search";
 import * as api from "./lib/api";
-import { ensureCrypto, loadIdentity } from "./lib/crypto";
+import {
+  activateIdentity,
+  deactivateIdentity,
+  detectCurve25519Support,
+  ensureCrypto,
+  forgetIdentity,
+  hasStoredIdentity,
+  unlockIdentity,
+} from "./lib/crypto";
 import type {
   Conversation,
   Group,
@@ -18,7 +26,7 @@ import type {
   User,
 } from "./types";
 
-type Stage = "boot" | "onboard" | "ready";
+type Stage = "boot" | "unlock" | "onboard" | "ready";
 
 function readView(): View {
   const value = window.location.hash.replace("#", "");
@@ -38,27 +46,57 @@ export default function App() {
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
   const [bootError, setBootError] = useState<string | null>(null);
+  const [unlockError, setUnlockError] = useState<string | null>(null);
+  const [unlocking, setUnlocking] = useState(false);
 
-  /* boot */
   useEffect(() => {
-    if (!ensureCrypto()) {
-      setBootError("WebCrypto indisponible — utilisez HTTPS ou un navigateur récent.");
-      return;
+    let cancelled = false;
+    async function boot() {
+      if (!ensureCrypto()) {
+        setBootError("WebCrypto indisponible — utilisez HTTPS ou un navigateur récent.");
+        return;
+      }
+      const support = await detectCurve25519Support();
+      if (!support.ed25519 || !support.x25519) {
+        setBootError(
+          "Votre navigateur ne supporte pas Ed25519 ou X25519. " +
+            "Mise à jour requise : Chrome 133+, Firefox 130+, Safari 17+, Edge 133+.",
+        );
+        return;
+      }
+      const stored = await hasStoredIdentity();
+      if (cancelled) return;
+      setStage(stored ? "unlock" : "onboard");
     }
-    const stored = loadIdentity();
-    if (!stored) {
-      setStage("onboard");
-      return;
-    }
-    enter(stored);
+    boot();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  /* hash routing */
   useEffect(() => {
     const onHash = () => setView(readView());
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
+
+  async function tryUnlock(password: string) {
+    setUnlocking(true);
+    setUnlockError(null);
+    try {
+      const next = await unlockIdentity(password);
+      if (!next) {
+        setUnlockError("Mot de passe local incorrect.");
+        return;
+      }
+      await activateIdentity(next, password);
+      await enter(next);
+    } catch (err) {
+      setUnlockError(err instanceof Error ? err.message : "Erreur");
+    } finally {
+      setUnlocking(false);
+    }
+  }
 
   async function enter(next: Identity) {
     setIdentity(next);
@@ -90,7 +128,7 @@ export default function App() {
       ownerHash: identity.publicHash,
       peerHash: user.publicHash,
       peerUsername: user.username,
-      peerPublicKey: user.publicKey,
+      peerPublicKeyX25519: user.publicKeyX25519,
     });
     setConversations((items) => {
       const existing = items.find((c) => c.id === conversation.id);
@@ -101,7 +139,9 @@ export default function App() {
     navigate("chat");
   }
 
-  function logout() {
+  async function logout() {
+    await forgetIdentity();
+    deactivateIdentity();
     setIdentity(null);
     setPosts([]);
     setConversations([]);
@@ -133,8 +173,26 @@ export default function App() {
     );
   }
 
+  if (stage === "unlock") {
+    return (
+      <UnlockScreen
+        onUnlock={tryUnlock}
+        onForget={logout}
+        error={unlockError}
+        loading={unlocking}
+      />
+    );
+  }
+
   if (stage === "onboard" || !identity) {
-    return <Onboarding onReady={enter} />;
+    return (
+      <Onboarding
+        onReady={async (fresh) => {
+          setIdentity(fresh);
+          await enter(fresh);
+        }}
+      />
+    );
   }
 
   return (
@@ -177,5 +235,59 @@ export default function App() {
       ) : null}
       {view === "dossier" ? <Dossier identity={identity} onLogout={logout} /> : null}
     </Shell>
+  );
+}
+
+function UnlockScreen({
+  onUnlock,
+  onForget,
+  error,
+  loading,
+}: {
+  onUnlock: (password: string) => void;
+  onForget: () => void;
+  error: string | null;
+  loading: boolean;
+}) {
+  const [password, setPassword] = useState("");
+  return (
+    <div className="grid min-h-screen place-items-center px-6">
+      <form
+        className="leaf w-full max-w-md p-8"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (password) onUnlock(password);
+        }}
+      >
+        <p className="kicker">Bureau scellé</p>
+        <h1 className="masthead mt-2 text-4xl">Déverrouiller</h1>
+        <p className="marginalia mt-3">
+          Mot de passe local — utilisé uniquement pour déchiffrer votre clé privée
+          stockée dans ce navigateur. Il n'est jamais transmis au serveur.
+        </p>
+        <label className="kicker mt-6 block">Mot de passe local</label>
+        <input
+          type="password"
+          autoFocus
+          autoComplete="current-password"
+          className="field"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+        />
+        {error ? (
+          <p className="mt-3 inline-flex border-2 border-stamp bg-stamp/5 px-2 py-1 font-mono text-[11px] font-bold uppercase tracking-ultra text-stamp">
+            {error}
+          </p>
+        ) : null}
+        <div className="mt-6 flex flex-wrap gap-3">
+          <button className="btn-stamp" type="submit" disabled={!password || loading}>
+            {loading ? "Déchiffrement…" : "Entrer"}
+          </button>
+          <button type="button" className="btn-ghost" onClick={onForget}>
+            Effacer ce dossier
+          </button>
+        </div>
+      </form>
+    </div>
   );
 }

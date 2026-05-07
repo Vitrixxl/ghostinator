@@ -1,25 +1,34 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useCallback, useState } from "react";
 import * as api from "../lib/api";
 import {
+  activateIdentity,
   createIdentity,
   identityExport,
-  persistIdentity,
   shortHash,
 } from "../lib/crypto";
 import type { Identity } from "../types";
+import { isTurnstileEnabled, TurnstileWidget } from "./Turnstile";
 import { CopyBox, Fleuron, Masthead, Sigil, Stamp } from "./ui";
 
 type Stage = "alias" | "minting" | "dossier";
 
-export function Onboarding({ onReady }: { onReady: (identity: Identity) => void }) {
+export function Onboarding({ onReady }: { onReady: (identity: Identity) => Promise<void> | void }) {
   const [stage, setStage] = useState<Stage>("alias");
   const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [passwordConfirm, setPasswordConfirm] = useState("");
   const [identity, setIdentity] = useState<Identity | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [savedAck, setSavedAck] = useState(false);
   const [revealPrivate, setRevealPrivate] = useState(false);
+  const [turnstileToken, setTurnstileToken] = useState<string>("");
+  const [progress, setProgress] = useState<string>("");
 
   const validUsername = /^[a-zA-Z0-9_.\-]{2,32}$/.test(username);
+  const validPassword = password.length >= 10 && password === passwordConfirm;
+  const turnstileReady = !isTurnstileEnabled() || turnstileToken.length > 0;
+
+  const onTurnstileToken = useCallback((token: string) => setTurnstileToken(token), []);
 
   async function startMint(event: FormEvent) {
     event.preventDefault();
@@ -28,27 +37,36 @@ export function Onboarding({ onReady }: { onReady: (identity: Identity) => void 
       setError("2 à 32 caractères, lettres / chiffres / _ . - uniquement");
       return;
     }
+    if (!validPassword) {
+      setError("Mot de passe local : 10 caractères minimum, et identique dans les deux champs.");
+      return;
+    }
     setStage("minting");
     try {
-      const fresh = await createIdentity(username);
-      // Try to claim the username server-side. If the username is taken, surface the error.
+      setProgress("Forge des keypairs Ed25519 + X25519…");
+      const fresh = await createIdentity(username, password);
+      await activateIdentity(fresh, password);
+      setProgress("Calcul de la preuve de travail (PoW ~18 bits)…");
       await api.registerUser({
         username: fresh.username,
         publicHash: fresh.publicHash,
-        publicKey: fresh.publicKey,
+        publicKeyEd25519: fresh.publicKeyEd25519,
+        publicKeyX25519: fresh.publicKeyX25519,
+        turnstileToken: turnstileToken || undefined,
       });
       setIdentity(fresh);
       setStage("dossier");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erreur");
       setStage("alias");
+    } finally {
+      setProgress("");
     }
   }
 
-  function enterBureau() {
+  async function enterBureau() {
     if (!identity) return;
-    persistIdentity(identity);
-    onReady(identity);
+    await onReady(identity);
   }
 
   return (
@@ -75,17 +93,19 @@ export function Onboarding({ onReady }: { onReady: (identity: Identity) => void 
 
         <main className="grid grid-cols-1 gap-10 py-12 md:grid-cols-[1.2fr_1fr]">
           <section className="animate-rise-in" style={{ animationDelay: "120ms" }}>
-            <Stamp tone="stamp" rotate={-3}>Étape {stage === "alias" ? "1" : "2"} / 2</Stamp>
+            <Stamp tone="stamp" rotate={-3}>Étape {stage === "alias" || stage === "minting" ? "1" : "2"} / 2</Stamp>
             <h2 className="masthead mt-5 text-5xl md:text-6xl">
-              {stage === "alias" ? "Choisissez un alias" : "Votre dossier vient d'être ouvert"}
+              {stage === "dossier"
+                ? "Votre dossier vient d'être ouvert"
+                : "Forger une identité anonyme"}
             </h2>
             <p className="marginalia mt-4 max-w-md">
-              {stage === "alias"
-                ? "Un nom d'usage public, sans lien avec votre identité civile. Il sert à vous retrouver dans le directoire."
-                : "Une paire de clés ECDH a été forgée dans votre navigateur. Le serveur n'a reçu que la clé publique. Copiez la clé privée — vous ne la reverrez plus."}
+              {stage === "dossier"
+                ? "Une paire Ed25519 (signature) et une paire X25519 (DM E2EE) ont été forgées dans votre navigateur. Le serveur n'a reçu que les clés publiques."
+                : "Choisissez un alias public et un mot de passe local. Le mot de passe chiffre votre clé privée dans IndexedDB ; il n'est jamais transmis."}
             </p>
 
-            {stage === "alias" || stage === "minting" ? (
+            {stage !== "dossier" ? (
               <form onSubmit={startMint} className="mt-10 max-w-md">
                 <div>
                   <label className="kicker mb-1 block">Alias public</label>
@@ -106,19 +126,68 @@ export function Onboarding({ onReady }: { onReady: (identity: Identity) => void 
                   <p className="marginalia mt-2">
                     {username.length}/32 — lettres, chiffres, <code className="font-mono">_ . -</code>
                   </p>
-                  {error ? (
-                    <p className="mt-3 inline-flex border-2 border-stamp bg-stamp/5 px-2 py-1 font-mono text-[11px] font-bold uppercase tracking-ultra text-stamp">
-                      ✗ {error}
-                    </p>
-                  ) : null}
                 </div>
 
+                <div className="mt-6">
+                  <label className="kicker mb-1 block">Mot de passe local (≥ 10 caractères)</label>
+                  <input
+                    type="password"
+                    autoComplete="new-password"
+                    className="field"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    disabled={stage === "minting"}
+                  />
+                </div>
+                <div className="mt-3">
+                  <label className="kicker mb-1 block">Confirmation</label>
+                  <input
+                    type="password"
+                    autoComplete="new-password"
+                    className="field"
+                    value={passwordConfirm}
+                    onChange={(e) => setPasswordConfirm(e.target.value)}
+                    disabled={stage === "minting"}
+                  />
+                  <p className="marginalia mt-2">
+                    Sert uniquement à chiffrer votre clé privée dans ce navigateur. Jamais transmis.
+                  </p>
+                </div>
+
+                {isTurnstileEnabled() ? (
+                  <div className="mt-6">
+                    <label className="kicker mb-1 block">Vérification anti-bot (Turnstile)</label>
+                    <TurnstileWidget onToken={onTurnstileToken} />
+                  </div>
+                ) : null}
+
+                {error ? (
+                  <p className="mt-3 inline-flex border-2 border-stamp bg-stamp/5 px-2 py-1 font-mono text-[11px] font-bold uppercase tracking-ultra text-stamp">
+                    {error}
+                  </p>
+                ) : null}
+
+                {progress ? (
+                  <p className="mt-3 font-mono text-[11px] uppercase tracking-ultra text-cipher">
+                    {progress}
+                  </p>
+                ) : null}
+
                 <div className="mt-8 flex flex-wrap items-center gap-4">
-                  <button className="btn-stamp" type="submit" disabled={!validUsername || stage === "minting"}>
-                    {stage === "minting" ? "Forge en cours…" : "Forger ma paire de clés"}
+                  <button
+                    className="btn-stamp"
+                    type="submit"
+                    disabled={
+                      !validUsername ||
+                      !validPassword ||
+                      !turnstileReady ||
+                      stage === "minting"
+                    }
+                  >
+                    {stage === "minting" ? "Forge en cours…" : "Forger mes paires de clés"}
                   </button>
                   <span className="marginalia">
-                    Aucun email ni mot de passe n'est requis.
+                    Aucun email ni numéro de téléphone n'est requis.
                   </span>
                 </div>
               </form>
@@ -136,21 +205,24 @@ export function Onboarding({ onReady }: { onReady: (identity: Identity) => void 
             ) : null}
           </section>
 
-          <aside className="space-y-6 border-l border-rule pl-6 md:pl-10 animate-rise-in" style={{ animationDelay: "240ms" }}>
+          <aside
+            className="space-y-6 border-l border-rule pl-6 md:pl-10 animate-rise-in"
+            style={{ animationDelay: "240ms" }}
+          >
             <Pillar
               n="I."
-              title="Conversations chiffrées"
-              copy="Chaque DM est chiffré côté client via ECDH P-256 + AES-GCM. Le serveur n'enregistre que iv/cipher."
+              title="DM bout-en-bout"
+              copy="Chaque DM est chiffré côté client via X25519 ECDH + AES-GCM 256. Le serveur n'enregistre que iv + cipher."
             />
             <Pillar
               n="II."
-              title="Posts publics"
-              copy="Le feed est lisible par tout le monde — c'est sa raison d'être. Vos posts sont reliés à votre clé publique, pas à une identité civile."
+              title="Auth sans identité"
+              copy="Chaque requête est signée par votre clé Ed25519. Pas de mot de passe serveur, pas de session. L'identifiant est sha256(votre clé publique)."
             />
             <Pillar
               n="III."
-              title="Pas de mot de passe"
-              copy="Votre identité est votre paire de clés. Conservez-la, copiez-la — elle est votre seul moyen de retour."
+              title="Mot de passe local"
+              copy="Votre clé privée vit chiffrée dans IndexedDB par AES-GCM dérivé de ce mot de passe via PBKDF2 210 000 itérations. Il ne quitte jamais votre appareil."
             />
 
             <div className="leaf p-5">
@@ -158,8 +230,8 @@ export function Onboarding({ onReady }: { onReady: (identity: Identity) => void 
               <ul className="mt-4 space-y-2 font-mono text-[11.5px] text-graphite">
                 <li>· Front PWA — Cloudflare Pages</li>
                 <li>· API edge — Cloudflare Worker</li>
-                <li>· Base de données — Supabase Postgres</li>
-                <li>· Crypto — WebCrypto natif</li>
+                <li>· Base de données — Supabase Postgres EU</li>
+                <li>· Crypto — WebCrypto natif (Ed25519 + X25519)</li>
               </ul>
             </div>
           </aside>
@@ -220,28 +292,26 @@ function Dossier({
               </p>
             </div>
           </div>
-          <Stamp tone="cipher" rotate={4}>ECDH · P-256</Stamp>
+          <Stamp tone="cipher" rotate={4}>Ed25519 + X25519</Stamp>
         </header>
 
         <div className="mt-5 space-y-4">
           <CopyBox label="Empreinte publique (sha-256)" value={identity.publicHash} />
-          <CopyBox label="Clé publique (raw, base64)" value={identity.publicKey} />
-          <div>
-            <CopyBox
-              label="Clé privée (jwk) — ne la perdez pas"
-              value={JSON.stringify(identity.privateJwk, null, 2)}
-              multiline
-              reveal={revealPrivate}
-            />
-            <button
-              type="button"
-              className="mt-2 font-mono text-[10.5px] font-bold uppercase tracking-ultra text-cipher hover:underline"
-              onClick={() => setRevealPrivate(!revealPrivate)}
-            >
-              {revealPrivate ? "◐ Masquer" : "◑ Révéler"} la clé privée
-            </button>
-          </div>
-          <CopyBox label="Export complet (alias + clés)" value={exportJson} multiline reveal={revealPrivate} />
+          <CopyBox label="Clé publique Ed25519 (raw, base64)" value={identity.publicKeyEd25519} />
+          <CopyBox label="Clé publique X25519 (raw, base64)" value={identity.publicKeyX25519} />
+          <CopyBox
+            label="Export complet chiffré (à sauvegarder hors ligne)"
+            value={exportJson}
+            multiline
+            reveal={revealPrivate}
+          />
+          <button
+            type="button"
+            className="font-mono text-[10.5px] font-bold uppercase tracking-ultra text-cipher hover:underline"
+            onClick={() => setRevealPrivate(!revealPrivate)}
+          >
+            {revealPrivate ? "Masquer" : "Révéler"} l'export complet
+          </button>
         </div>
 
         <label className="mt-6 flex cursor-pointer items-start gap-3 border-2 border-dashed border-stamp/60 p-3">
@@ -252,7 +322,7 @@ function Dossier({
             onChange={(event) => setSavedAck(event.target.checked)}
           />
           <span className="font-mono text-[11px] uppercase tracking-widest text-graphite">
-            J'ai sauvegardé ma clé privée hors ligne. Je comprends qu'elle ne sera plus affichée.
+            J'ai sauvegardé mon export hors ligne. Sans lui ni mon mot de passe local, mon compte est irrécupérable.
           </span>
         </label>
 
@@ -260,7 +330,7 @@ function Dossier({
           <button className="btn-stamp" disabled={!savedAck} onClick={onContinue}>
             Entrer au bureau →
           </button>
-          <span className="marginalia">L'identité est stockée localement dans ce navigateur.</span>
+          <span className="marginalia">L'identité est stockée chiffrée dans IndexedDB de ce navigateur.</span>
         </div>
       </div>
     </div>
@@ -270,10 +340,14 @@ function Dossier({
 function DecorativeRules() {
   return (
     <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
-      {/* Vertical rule on left edge */}
-      <div className="absolute left-0 top-0 hidden h-full w-px bg-rule md:block" style={{ left: "min(40px, 4vw)" }} />
-      <div className="absolute right-0 top-0 hidden h-full w-px bg-rule md:block" style={{ right: "min(40px, 4vw)" }} />
-      {/* Soft margin numerals */}
+      <div
+        className="absolute left-0 top-0 hidden h-full w-px bg-rule md:block"
+        style={{ left: "min(40px, 4vw)" }}
+      />
+      <div
+        className="absolute right-0 top-0 hidden h-full w-px bg-rule md:block"
+        style={{ right: "min(40px, 4vw)" }}
+      />
       <span className="absolute left-2 top-8 hidden font-mono text-[10px] uppercase tracking-ultra text-chalk md:block">
         №001
       </span>
