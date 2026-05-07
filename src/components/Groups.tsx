@@ -2,28 +2,39 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import * as api from "../lib/api";
 import {
   decryptWithKey,
+  encodeGroupInvite,
+  encryptForPeer,
   encryptWithKey,
   generateGroupKey,
   loadGroupKey,
   saveGroupKey,
   shortHash,
 } from "../lib/crypto";
-import type { Group, GroupMessage, Identity } from "../types";
+import type { Conversation, Group, GroupMessage, Identity, User } from "../types";
 import { CopyBox, Empty, Sigil, Stamp } from "./ui";
 
 export function Groups({
   identity,
   groups,
+  joinedGroupIds,
+  conversations,
   onCreate,
+  onJoined,
   onGroupMessage,
+  onSendDmInvite,
 }: {
   identity: Identity;
   groups: Group[];
+  joinedGroupIds: Set<string>;
+  conversations: Conversation[];
   onCreate: (group: Group) => void;
+  onJoined: (groupId: string) => void;
   onGroupMessage: (groupId: string, message: GroupMessage) => void;
+  onSendDmInvite: (peerHash: string, ciphertext: { iv: string; cipher: string }) => Promise<void>;
 }) {
   const [createOpen, setCreateOpen] = useState(false);
   const [joinOpen, setJoinOpen] = useState(false);
+  const [discoverOpen, setDiscoverOpen] = useState(false);
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
 
   const activeGroup = useMemo(
@@ -31,13 +42,20 @@ export function Groups({
     [groups, activeGroupId],
   );
 
+  const myGroups = useMemo(
+    () => groups.filter((g) => joinedGroupIds.has(g.id)),
+    [groups, joinedGroupIds],
+  );
+
   if (activeGroup) {
     return (
       <GroupThread
         identity={identity}
         group={activeGroup}
+        conversations={conversations}
         onBack={() => setActiveGroupId(null)}
         onMessage={onGroupMessage}
+        onSendDmInvite={onSendDmInvite}
       />
     );
   }
@@ -49,10 +67,16 @@ export function Groups({
           <p className="kicker">Salons fermés</p>
           <h2 className="masthead text-3xl sm:text-4xl md:text-5xl">Cercles</h2>
           <p className="marginalia mt-1">
-            Métadonnées publiques. Contenu chiffré sous une clé symétrique partagée hors-bande.
+            Vos cercles. Contenu chiffré sous une clé symétrique locale, jamais partagée au serveur.
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
+          <button
+            className="btn-ghost px-3 py-2 text-[10px] sm:text-[11px]"
+            onClick={() => setDiscoverOpen(true)}
+          >
+            ⌕ Découvrir
+          </button>
           <button
             className="btn-ghost px-3 py-2 text-[10px] sm:text-[11px]"
             onClick={() => setJoinOpen(true)}
@@ -68,13 +92,16 @@ export function Groups({
         </div>
       </header>
 
-      {groups.length === 0 ? (
+      {myGroups.length === 0 ? (
         <div className="mt-6 sm:mt-8">
-          <Empty title="Aucun cercle ouvert" hint="Fondez ou rejoignez un cercle." />
+          <Empty
+            title="Vous n'êtes dans aucun cercle"
+            hint="Fondez-en un, rejoignez via une clé partagée hors-bande, ou découvrez ceux qui existent."
+          />
         </div>
       ) : (
         <div className="mt-5 grid gap-4 sm:mt-7 sm:gap-5 md:grid-cols-2">
-          {groups.map((group) => (
+          {myGroups.map((group) => (
             <GroupCard
               key={group.id}
               group={group}
@@ -102,9 +129,18 @@ export function Groups({
           groups={groups}
           onClose={() => setJoinOpen(false)}
           onJoined={(groupId) => {
+            onJoined(groupId);
             setJoinOpen(false);
             setActiveGroupId(groupId);
           }}
+        />
+      ) : null}
+
+      {discoverOpen ? (
+        <DiscoverModal
+          groups={groups}
+          joinedGroupIds={joinedGroupIds}
+          onClose={() => setDiscoverOpen(false)}
         />
       ) : null}
     </section>
@@ -158,20 +194,27 @@ function GroupCard({
 function GroupThread({
   identity,
   group,
+  conversations,
   onBack,
   onMessage,
+  onSendDmInvite,
 }: {
   identity: Identity;
   group: Group;
+  conversations: Conversation[];
   onBack: () => void;
   onMessage: (groupId: string, message: GroupMessage) => void;
+  onSendDmInvite: (peerHash: string, ciphertext: { iv: string; cipher: string }) => Promise<void>;
 }) {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [groupKey, setGroupKey] = useState<string | null>(null);
   const [decrypted, setDecrypted] = useState<Record<string, string | null>>({});
+  const [inviteOpen, setInviteOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const isOwner = group.ownerHash === identity.publicHash;
 
   /* Récupère la clé symétrique du cercle stockée localement (IndexedDB). */
   useEffect(() => {
@@ -258,11 +301,11 @@ function GroupThread({
 
   return (
     <article className="leaf flex h-[calc(100vh-180px)] flex-col md:h-[calc(100vh-160px)]">
-      <header className="flex items-center justify-between gap-3 border-b-[2px] border-ink p-3 sm:gap-4 sm:p-4 md:p-5">
+      <header className="flex items-center justify-between gap-2 border-b-[2px] border-ink p-3 sm:gap-3 sm:p-4 md:p-5">
         <button className="btn-icon shrink-0" aria-label="Retour" onClick={onBack}>
           ←
         </button>
-        <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+        <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
           <Sigil text={group.name} size={40} tone="moss" />
           <div className="min-w-0">
             <p className="kicker">Cercle</p>
@@ -274,9 +317,15 @@ function GroupThread({
             </p>
           </div>
         </div>
-        <span className="hidden shrink-0 sm:inline-flex">
-          <Stamp tone="cipher" rotate={-5}>AES-GCM 256</Stamp>
-        </span>
+        {isOwner ? (
+          <button
+            type="button"
+            className="btn-ghost shrink-0 px-2.5 py-1.5 text-[10px] sm:px-3 sm:py-2 sm:text-[11px]"
+            onClick={() => setInviteOpen(true)}
+          >
+            + Inviter
+          </button>
+        ) : null}
       </header>
 
       <div
@@ -325,7 +374,315 @@ function GroupThread({
           </button>
         </div>
       </form>
+
+      {inviteOpen && groupKey ? (
+        <InviteModal
+          identity={identity}
+          group={group}
+          groupKey={groupKey}
+          conversations={conversations}
+          onClose={() => setInviteOpen(false)}
+          onSendDmInvite={onSendDmInvite}
+        />
+      ) : null}
     </article>
+  );
+}
+
+function InviteModal({
+  identity,
+  group,
+  groupKey,
+  conversations,
+  onClose,
+  onSendDmInvite,
+}: {
+  identity: Identity;
+  group: Group;
+  groupKey: string;
+  conversations: Conversation[];
+  onClose: () => void;
+  onSendDmInvite: (peerHash: string, ciphertext: { iv: string; cipher: string }) => Promise<void>;
+}) {
+  const [search, setSearch] = useState("");
+  const [results, setResults] = useState<User[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [sendingTo, setSendingTo] = useState<string | null>(null);
+  const [done, setDone] = useState<Set<string>>(new Set());
+  const [error, setError] = useState<string | null>(null);
+
+  /* Suggestions par défaut : les pairs avec qui on a déjà ouvert une conversation. */
+  const knownPeers = useMemo(() => {
+    const map = new Map<
+      string,
+      { hash: string; username: string; pubkeyX25519: string }
+    >();
+    conversations.forEach((c) => {
+      const isOwner = c.ownerHash === identity.publicHash;
+      const peerHash = isOwner ? c.peerHash : c.ownerHash;
+      const peerUsername = isOwner ? c.peerUsername : c.ownerUsername;
+      const peerPub = isOwner ? c.peerPublicKeyX25519 : c.ownerPublicKeyX25519;
+      if (!map.has(peerHash)) {
+        map.set(peerHash, { hash: peerHash, username: peerUsername, pubkeyX25519: peerPub });
+      }
+    });
+    return Array.from(map.values());
+  }, [conversations, identity.publicHash]);
+
+  useEffect(() => {
+    if (!search.trim()) {
+      setResults([]);
+      return;
+    }
+    let cancelled = false;
+    setSearching(true);
+    const timeout = setTimeout(async () => {
+      try {
+        const found = await api.searchUsers(search.trim(), identity.publicHash);
+        if (!cancelled) setResults(found);
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Erreur");
+      } finally {
+        if (!cancelled) setSearching(false);
+      }
+    }, 220);
+    return () => {
+      cancelled = true;
+      clearTimeout(timeout);
+    };
+  }, [search, identity.publicHash]);
+
+  async function inviteUser(peerHash: string, peerPubX25519: string) {
+    setSendingTo(peerHash);
+    setError(null);
+    try {
+      const json = encodeGroupInvite({
+        groupId: group.id,
+        groupName: group.name,
+        key: groupKey,
+      });
+      const encrypted = await encryptForPeer(peerPubX25519, json);
+      await onSendDmInvite(peerHash, encrypted);
+      setDone((prev) => new Set(prev).add(peerHash));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur");
+    } finally {
+      setSendingTo(null);
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-40 grid place-items-end bg-ink/40 backdrop-blur-sm sm:place-items-center sm:p-4"
+      role="dialog"
+    >
+      <div className="leaf animate-rise-in relative max-h-[92vh] w-full overflow-y-auto p-4 sm:max-w-xl sm:p-6">
+        <button
+          className="absolute right-4 top-3 font-mono text-[11px] font-bold uppercase tracking-ultra text-ash hover:text-stamp"
+          onClick={onClose}
+        >
+          × Fermer
+        </button>
+        <p className="kicker">Invitation</p>
+        <h3 className="masthead text-2xl sm:text-3xl">Inviter dans {group.name}</h3>
+        <p className="marginalia mt-1">
+          Une invitation chiffrée bout-en-bout est envoyée par DM. Le destinataire clique sur
+          « Rejoindre le cercle » dans le DM, et la clé est copiée chez lui automatiquement.
+        </p>
+
+        <div className="mt-5">
+          <label className="kicker mb-1 block">Chercher un agent</label>
+          <div className="flex items-center gap-2 border-2 border-ink bg-cream px-3 py-2">
+            <span className="font-mono text-[12px] font-extrabold uppercase tracking-ultra text-ash">⌕</span>
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="alias public"
+              className="w-full bg-transparent font-mono text-[13px] outline-none"
+              spellCheck={false}
+              autoComplete="off"
+            />
+            {searching ? (
+              <span className="inline-block h-2 w-2 animate-blink bg-stamp" aria-label="loading" />
+            ) : null}
+          </div>
+        </div>
+
+        {error ? (
+          <p className="mt-3 border border-stamp bg-stamp/5 p-2 font-mono text-[11px] uppercase tracking-ultra text-stamp">
+            {error}
+          </p>
+        ) : null}
+
+        <div className="mt-5 space-y-3">
+          {!search.trim() && knownPeers.length > 0 ? (
+            <>
+              <p className="kicker">Vos correspondants récents</p>
+              <ul className="space-y-2">
+                {knownPeers.map((peer) => (
+                  <InviteRow
+                    key={peer.hash}
+                    username={peer.username}
+                    publicHash={peer.hash}
+                    pubkeyX25519={peer.pubkeyX25519}
+                    sending={sendingTo === peer.hash}
+                    invited={done.has(peer.hash)}
+                    onInvite={inviteUser}
+                  />
+                ))}
+              </ul>
+            </>
+          ) : null}
+
+          {search.trim() && results.length === 0 && !searching ? (
+            <p className="font-serif text-sm italic text-smoke">Aucun agent trouvé.</p>
+          ) : null}
+
+          {search.trim() && results.length > 0 ? (
+            <ul className="space-y-2">
+              {results.map((user) => (
+                <InviteRow
+                  key={user.publicHash}
+                  username={user.username}
+                  publicHash={user.publicHash}
+                  pubkeyX25519={user.publicKeyX25519}
+                  sending={sendingTo === user.publicHash}
+                  invited={done.has(user.publicHash)}
+                  onInvite={inviteUser}
+                />
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function InviteRow({
+  username,
+  publicHash,
+  pubkeyX25519,
+  sending,
+  invited,
+  onInvite,
+}: {
+  username: string;
+  publicHash: string;
+  pubkeyX25519: string;
+  sending: boolean;
+  invited: boolean;
+  onInvite: (peerHash: string, peerPubX25519: string) => void;
+}) {
+  return (
+    <li className="flex items-center gap-3 border border-rule bg-cream px-3 py-2">
+      <Sigil text={username} size={36} tone="cipher" />
+      <div className="min-w-0 flex-1">
+        <p className="truncate font-display text-base font-semibold leading-tight">@{username}</p>
+        <p className="truncate font-mono text-[10.5px] text-ash">{shortHash(publicHash, 8)}</p>
+      </div>
+      {invited ? (
+        <span className="dispatch-no shrink-0 text-cipher">envoyé ✓</span>
+      ) : (
+        <button
+          type="button"
+          disabled={sending}
+          className="btn-ghost shrink-0 px-3 py-1.5 text-[10px]"
+          onClick={() => onInvite(publicHash, pubkeyX25519)}
+        >
+          {sending ? "…" : "Inviter"}
+        </button>
+      )}
+    </li>
+  );
+}
+
+function DiscoverModal({
+  groups,
+  joinedGroupIds,
+  onClose,
+}: {
+  groups: Group[];
+  joinedGroupIds: Set<string>;
+  onClose: () => void;
+}) {
+  const [search, setSearch] = useState("");
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return groups.filter((g) => {
+      if (joinedGroupIds.has(g.id)) return false;
+      if (!q) return true;
+      return g.name.toLowerCase().includes(q) || g.topic.toLowerCase().includes(q);
+    });
+  }, [groups, joinedGroupIds, search]);
+
+  return (
+    <div
+      className="fixed inset-0 z-40 grid place-items-end bg-ink/40 backdrop-blur-sm sm:place-items-center sm:p-4"
+      role="dialog"
+    >
+      <div className="leaf animate-rise-in relative flex max-h-[92vh] w-full flex-col overflow-hidden p-4 sm:max-w-2xl sm:p-6">
+        <button
+          className="absolute right-4 top-3 font-mono text-[11px] font-bold uppercase tracking-ultra text-ash hover:text-stamp"
+          onClick={onClose}
+        >
+          × Fermer
+        </button>
+        <p className="kicker">Annuaire des cercles</p>
+        <h3 className="masthead text-2xl sm:text-3xl">Découvrir</h3>
+        <p className="marginalia mt-1">
+          Métadonnées publiques. Pour rejoindre un cercle, demande la clé symétrique au fondateur ou attends une invitation par DM.
+        </p>
+
+        <div className="mt-5">
+          <div className="flex items-center gap-2 border-2 border-ink bg-cream px-3 py-2">
+            <span className="font-mono text-[12px] font-extrabold uppercase tracking-ultra text-ash">⌕</span>
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="nom ou sujet"
+              className="w-full bg-transparent font-mono text-[13px] outline-none"
+              spellCheck={false}
+              autoComplete="off"
+              autoFocus
+            />
+          </div>
+        </div>
+
+        <div className="mt-4 flex-1 overflow-y-auto">
+          {filtered.length === 0 ? (
+            <p className="font-serif text-sm italic text-smoke">
+              {search.trim()
+                ? "Aucun cercle ne correspond."
+                : "Aucun cercle public à découvrir."}
+            </p>
+          ) : (
+            <ul className="space-y-3">
+              {filtered.map((g) => (
+                <li key={g.id} className="border border-rule bg-cream p-3">
+                  <div className="flex items-start gap-3">
+                    <Sigil text={g.name} size={36} tone="moss" />
+                    <div className="min-w-0 flex-1">
+                      <p className="kicker truncate">№{g.id.slice(0, 6)}</p>
+                      <p className="break-words font-display text-lg font-semibold leading-tight">
+                        {g.name}
+                      </p>
+                      <p className="mt-1 break-words font-serif text-sm leading-5 text-graphite">
+                        {g.topic}
+                      </p>
+                      <p className="mt-2 font-mono text-[10px] uppercase tracking-ultra text-ash">
+                        fondé par @{g.ownerUsername} ·{" "}
+                        {(g.messages?.length || 0)} message{(g.messages?.length || 0) === 1 ? "" : "s"}
+                      </p>
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 

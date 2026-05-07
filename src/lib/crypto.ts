@@ -435,6 +435,64 @@ export async function loadGroupKey(groupId: string): Promise<string | null> {
   }
 }
 
+/* ---------- payloads typés (rétrocompatibles avec le texte brut) ----------
+   Format : un JSON `{"_t":"<type>", ...}`. Si le déchiffré n'est pas du JSON
+   valide ou n'a pas `_t`, on retombe sur du texte brut.
+
+   Types supportés :
+   - `text`   : message texte standard (sérialisation explicite, équivaut au
+                fallback)
+   - `group_invite` : invitation à rejoindre un cercle (id + nom + clé). */
+
+export type GroupInvitePayload = {
+  _t: "group_invite";
+  groupId: string;
+  groupName: string;
+  key: string;
+};
+
+export type DecodedMessage =
+  | { type: "text"; body: string }
+  | { type: "group_invite"; groupId: string; groupName: string; key: string };
+
+export function decodeMessageContent(plain: string): DecodedMessage {
+  try {
+    const obj = JSON.parse(plain) as { _t?: string };
+    if (obj && obj._t === "group_invite") {
+      const invite = obj as unknown as GroupInvitePayload;
+      if (
+        typeof invite.groupId === "string" &&
+        typeof invite.groupName === "string" &&
+        typeof invite.key === "string"
+      ) {
+        return {
+          type: "group_invite",
+          groupId: invite.groupId,
+          groupName: invite.groupName,
+          key: invite.key,
+        };
+      }
+    }
+  } catch {
+    /* fallback texte brut */
+  }
+  return { type: "text", body: plain };
+}
+
+export function encodeGroupInvite(invite: {
+  groupId: string;
+  groupName: string;
+  key: string;
+}): string {
+  const payload: GroupInvitePayload = {
+    _t: "group_invite",
+    groupId: invite.groupId,
+    groupName: invite.groupName,
+    key: invite.key,
+  };
+  return JSON.stringify(payload);
+}
+
 /* ---------- Proof-of-Work Hashcash ---------- */
 
 async function countLeadingZeroBits(bytes: Uint8Array) {

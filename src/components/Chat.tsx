@@ -1,6 +1,12 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import * as api from "../lib/api";
-import { decryptFromPeer, encryptForPeer, shortHash } from "../lib/crypto";
+import {
+  type DecodedMessage,
+  decodeMessageContent,
+  decryptFromPeer,
+  encryptForPeer,
+  shortHash,
+} from "../lib/crypto";
 import type { Conversation, Identity, Message, User } from "../types";
 import { SearchModal } from "./SearchModal";
 import { Empty, Sigil, Stamp } from "./ui";
@@ -10,15 +16,19 @@ export function ChatView({
   conversations,
   activeId,
   setActiveId,
+  joinedGroupIds,
   onMessage,
   onOpenConversationWith,
+  onAcceptInvite,
 }: {
   identity: Identity;
   conversations: Conversation[];
   activeId: string | null;
   setActiveId: (id: string | null) => void;
+  joinedGroupIds: Set<string>;
   onMessage: (conversationId: string, message: Message) => void;
   onOpenConversationWith: (user: User) => void | Promise<void>;
+  onAcceptInvite: (groupId: string, key: string) => Promise<void>;
 }) {
   const active = useMemo(
     () => conversations.find((c) => c.id === activeId) || null,
@@ -43,8 +53,10 @@ export function ChatView({
           <Thread
             identity={identity}
             conversation={active}
+            joinedGroupIds={joinedGroupIds}
             onMessage={onMessage}
             onBack={() => setActiveId(null)}
+            onAcceptInvite={onAcceptInvite}
           />
         ) : (
           <Empty
@@ -153,18 +165,22 @@ function ConversationList({
 function Thread({
   identity,
   conversation,
+  joinedGroupIds,
   onMessage,
   onBack,
+  onAcceptInvite,
 }: {
   identity: Identity;
   conversation: Conversation;
+  joinedGroupIds: Set<string>;
   onMessage: (conversationId: string, message: Message) => void;
   onBack: () => void;
+  onAcceptInvite: (groupId: string, key: string) => Promise<void>;
 }) {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [decrypted, setDecrypted] = useState<Record<string, string | null>>({});
+  const [decoded, setDecoded] = useState<Record<string, DecodedMessage | null>>({});
   const scrollRef = useRef<HTMLDivElement>(null);
 
   /* Selon que l'utilisateur courant est ownerHash ou peerHash de la conversation,
@@ -180,15 +196,16 @@ function Thread({
   useEffect(() => {
     let cancelled = false;
     async function decryptAll() {
-      const out: Record<string, string | null> = {};
+      const out: Record<string, DecodedMessage | null> = {};
       for (const message of conversation.messages) {
         try {
-          out[message.id] = await decryptFromPeer(otherPubKeyX25519, message.encrypted);
+          const plain = await decryptFromPeer(otherPubKeyX25519, message.encrypted);
+          out[message.id] = decodeMessageContent(plain);
         } catch {
           out[message.id] = null;
         }
       }
-      if (!cancelled) setDecrypted(out);
+      if (!cancelled) setDecoded(out);
     }
     decryptAll();
     return () => {
@@ -267,7 +284,14 @@ function Thread({
               key={message.id}
               own={message.authorHash === identity.publicHash}
               message={message}
-              decrypted={decrypted[message.id]}
+              decoded={decoded[message.id]}
+              alreadyJoined={
+                decoded[message.id]?.type === "group_invite" &&
+                joinedGroupIds.has(
+                  (decoded[message.id] as { groupId: string }).groupId,
+                )
+              }
+              onAcceptInvite={onAcceptInvite}
             />
           ))
         )}
@@ -309,24 +333,39 @@ function Thread({
 function Bubble({
   own,
   message,
-  decrypted,
+  decoded,
+  alreadyJoined,
+  onAcceptInvite,
 }: {
   own: boolean;
   message: Message;
-  decrypted: string | null | undefined;
+  decoded: DecodedMessage | null | undefined;
+  alreadyJoined: boolean;
+  onAcceptInvite: (groupId: string, key: string) => Promise<void>;
 }) {
   const time = new Date(message.createdAt).toLocaleTimeString("fr-FR", {
     hour: "2-digit",
     minute: "2-digit",
   });
+
+  const isInvite = decoded?.type === "group_invite";
+
   return (
     <div className={`flex ${own ? "justify-end" : "justify-start"}`}>
       <div
         className={`relative max-w-[85%] border-[1.5px] p-2.5 sm:max-w-[75%] sm:p-3 ${
-          own ? "border-ink bg-cream" : "border-cipher bg-cipher/5 text-ink"
+          isInvite
+            ? "border-moss bg-moss/10 text-ink"
+            : own
+              ? "border-ink bg-cream"
+              : "border-cipher bg-cipher/5 text-ink"
         }`}
         style={{
-          boxShadow: own ? "3px 3px 0 #181410" : "3px 3px 0 #1f3552",
+          boxShadow: isInvite
+            ? "3px 3px 0 #4f6048"
+            : own
+              ? "3px 3px 0 #181410"
+              : "3px 3px 0 #1f3552",
         }}
       >
         <div className="mb-1 flex items-center justify-between gap-3 border-b border-rule pb-1">
@@ -335,21 +374,72 @@ function Bubble({
           </span>
           <span className="shrink-0 font-mono text-[10px] text-smoke">{time}</span>
         </div>
-        {decrypted === undefined ? (
+        {decoded === undefined ? (
           <p className="font-serif text-sm italic text-smoke">Déchiffrement…</p>
-        ) : decrypted === null ? (
+        ) : decoded === null ? (
           <p className="font-serif text-sm italic text-stamp">
             Échec du déchiffrement — clé indisponible.
           </p>
+        ) : decoded.type === "group_invite" ? (
+          <InviteCard
+            invite={decoded}
+            alreadyJoined={alreadyJoined}
+            ownInvite={own}
+            onAccept={() => onAcceptInvite(decoded.groupId, decoded.key)}
+          />
         ) : (
           <p className="whitespace-pre-wrap break-words font-serif text-[15px] leading-6 sm:text-base sm:leading-7">
-            {decrypted}
+            {decoded.body}
           </p>
         )}
         <p className="mt-2 truncate font-mono text-[9.5px] text-chalk">
           cipher {shortHash(message.encrypted.cipher, 6)}
         </p>
       </div>
+    </div>
+  );
+}
+
+function InviteCard({
+  invite,
+  alreadyJoined,
+  ownInvite,
+  onAccept,
+}: {
+  invite: { groupId: string; groupName: string; key: string };
+  alreadyJoined: boolean;
+  ownInvite: boolean;
+  onAccept: () => void;
+}) {
+  const [accepting, setAccepting] = useState(false);
+  return (
+    <div className="space-y-2">
+      <p className="font-mono text-[10px] uppercase tracking-ultra text-moss">
+        Invitation à un cercle
+      </p>
+      <p className="font-display text-lg font-bold leading-tight">{invite.groupName}</p>
+      <p className="break-all font-mono text-[10.5px] text-ash">№{invite.groupId.slice(0, 8)}</p>
+      {ownInvite ? (
+        <p className="marginalia">Invitation envoyée. La clé est embarquée dans le message chiffré.</p>
+      ) : alreadyJoined ? (
+        <p className="font-serif text-sm italic text-cipher">Vous avez rejoint ce cercle.</p>
+      ) : (
+        <button
+          type="button"
+          className="btn-stamp w-full px-3 py-2 text-[10px]"
+          disabled={accepting}
+          onClick={async () => {
+            setAccepting(true);
+            try {
+              await onAccept();
+            } finally {
+              setAccepting(false);
+            }
+          }}
+        >
+          {accepting ? "Adhésion…" : "Rejoindre le cercle"}
+        </button>
+      )}
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ChatView } from "./components/Chat";
 import { Dossier } from "./components/Dossier";
 import { Feed } from "./components/Feed";
@@ -15,6 +15,8 @@ import {
   ensureCrypto,
   forgetIdentity,
   hasStoredIdentity,
+  loadGroupKey,
+  saveGroupKey,
   tryAutoUnlock,
   unlockIdentity,
 } from "./lib/crypto";
@@ -52,6 +54,18 @@ export default function App() {
   const [bootError, setBootError] = useState<string | null>(null);
   const [unlockError, setUnlockError] = useState<string | null>(null);
   const [unlocking, setUnlocking] = useState(false);
+  const [joinedGroupIds, setJoinedGroupIds] = useState<Set<string>>(new Set());
+
+  /* Recalcule l'ensemble des groupes dont on a la clé locale (= dont on est membre).
+     À appeler après chaque join / leave / boot. */
+  const refreshJoinedGroups = useCallback(async (allGroups: Group[]) => {
+    const next = new Set<string>();
+    for (const g of allGroups) {
+      const key = await loadGroupKey(g.id);
+      if (key) next.add(g.id);
+    }
+    setJoinedGroupIds(next);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -126,6 +140,7 @@ export default function App() {
       setGroups(bootstrap.groups);
       setActiveChatId(bootstrap.conversations[0]?.id || null);
       setHealth(healthInfo);
+      await refreshJoinedGroups(bootstrap.groups);
       setStage("ready");
     } catch (err) {
       setBootError(err instanceof Error ? err.message : "Erreur d'amorçage");
@@ -202,6 +217,46 @@ export default function App() {
     });
     setActiveChatId(conversation.id);
     navigate("chat");
+  }
+
+  /* Envoi d'un DM contenant une invitation chiffrée à un cercle.
+     Si pas de conversation avec ce peer, on en crée une à la volée. */
+  async function sendDmInvite(peerHash: string, encrypted: { iv: string; cipher: string }) {
+    if (!identity) return;
+    const known = conversations.find(
+      (c) => c.peerHash === peerHash || c.ownerHash === peerHash,
+    );
+    let conversationId = known?.id;
+    if (!known) {
+      const peer = await api.getUser(peerHash);
+      const newConv = await api.createConversation({
+        ownerHash: identity.publicHash,
+        ownerUsername: identity.username,
+        ownerPublicKeyX25519: identity.publicKeyX25519,
+        peerHash: peer.publicHash,
+        peerUsername: peer.username,
+        peerPublicKeyX25519: peer.publicKeyX25519,
+      });
+      conversationId = newConv.id;
+      setConversations((items) =>
+        items.find((c) => c.id === newConv.id) ? items : [newConv, ...items],
+      );
+    }
+    if (!conversationId) return;
+    const message = await api.createMessage(conversationId, {
+      authorHash: identity.publicHash,
+      authorUsername: identity.username,
+      encrypted,
+    });
+    setConversations((items) =>
+      items.map((c) =>
+        c.id === conversationId
+          ? c.messages.find((m) => m.id === message.id)
+            ? c
+            : { ...c, messages: [...c.messages, message] }
+          : c,
+      ),
+    );
   }
 
   async function logout() {
@@ -283,6 +338,7 @@ export default function App() {
           conversations={conversations}
           activeId={activeChatId}
           setActiveId={setActiveChatId}
+          joinedGroupIds={joinedGroupIds}
           onMessage={(conversationId: string, message: Message) =>
             setConversations((items) =>
               items.map((c) =>
@@ -291,13 +347,25 @@ export default function App() {
             )
           }
           onOpenConversationWith={openConversationWith}
+          onAcceptInvite={async (groupId: string, key: string) => {
+            await saveGroupKey(groupId, key);
+            setJoinedGroupIds((prev) => new Set(prev).add(groupId));
+          }}
         />
       ) : null}
       {view === "groups" ? (
         <Groups
           identity={identity}
           groups={groups}
-          onCreate={(group: Group) => setGroups((items) => [group, ...items])}
+          joinedGroupIds={joinedGroupIds}
+          conversations={conversations}
+          onCreate={async (group: Group) => {
+            setGroups((items) => [group, ...items]);
+            setJoinedGroupIds((prev) => new Set(prev).add(group.id));
+          }}
+          onJoined={(groupId: string) => {
+            setJoinedGroupIds((prev) => new Set(prev).add(groupId));
+          }}
           onGroupMessage={(groupId: string, message: GroupMessage) =>
             setGroups((items) =>
               items.map((g) =>
@@ -309,6 +377,7 @@ export default function App() {
               ),
             )
           }
+          onSendDmInvite={sendDmInvite}
         />
       ) : null}
       {view === "dossier" ? <Dossier identity={identity} onLogout={logout} /> : null}
