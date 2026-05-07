@@ -2,8 +2,15 @@ name = "ghostinator-api"
 main = "worker/src/index.js"
 compatibility_date = "2026-05-07"
 
+# Worker exposé sur *.workers.dev (URL API publique).
+workers_dev = true
+# URLs uniques par déploiement, utiles pour tester avant promotion.
+preview_urls = true
+
 [vars]
 SUPABASE_URL = "https://tdbfzatpjxtxsoxsyyhh.supabase.co"
 
-# Set this secret before deployment:
-# wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+# Secrets à déposer avant deploy :
+#   wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+#   wrangler secret put RATELIMIT_SECRET
+#   wrangler secret put TURNSTILE_SECRET_KEY    (optionnel)
