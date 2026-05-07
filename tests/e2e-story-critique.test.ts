@@ -9,6 +9,7 @@
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { spawn, type ChildProcess } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -33,7 +34,7 @@ async function sha256Hex(value: string | Uint8Array) {
     .join("");
 }
 
-async function countLeadingZeroBits(bytes: Uint8Array) {
+function leadingZeroBits(bytes: Buffer | Uint8Array) {
   let zeros = 0;
   for (const byte of bytes) {
     if (byte === 0) {
@@ -50,13 +51,15 @@ async function countLeadingZeroBits(bytes: Uint8Array) {
   return zeros;
 }
 
-async function computePow(challenge: string, bits: number) {
-  for (let n = 0n; n < 1n << 32n; n += 1n) {
+/* PoW de test : utilise node:crypto sync, ~10x plus rapide que crypto.subtle async.
+   Le code de prod (Worker / navigateur) reste sur crypto.subtle.digest. */
+function computePow(challenge: string, bits: number) {
+  for (let n = 0; n < 2 ** 32; n += 1) {
     const nonce = n.toString(36);
-    const digest = new Uint8Array(
-      await crypto.subtle.digest("SHA-256", enc.encode(challenge + nonce)),
-    );
-    if ((await countLeadingZeroBits(digest)) >= bits) return nonce;
+    const digest = createHash("sha256")
+      .update(challenge + nonce)
+      .digest();
+    if (leadingZeroBits(digest) >= bits) return nonce;
   }
   throw new Error("PoW non trouvé");
 }
@@ -163,7 +166,7 @@ async function signedRequest(opts: {
     headers["x-signature"] = await buildSignature(opts.edPriv, opts.method, opts.path, bodyText);
   }
   if (opts.pow) {
-    headers["x-pow"] = await computePow(opts.pow.challenge, opts.pow.bits);
+    headers["x-pow"] = computePow(opts.pow.challenge, opts.pow.bits);
   }
   const r = await fetch(`${BASE}${opts.path}`, {
     method: opts.method,
