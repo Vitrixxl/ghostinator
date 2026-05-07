@@ -65,11 +65,13 @@ function SideRail({
   return (
     <aside className="hidden flex-col gap-6 border-r border-rule bg-paper px-6 pb-10 pt-7 lg:flex">
       <div className="border-b-[3px] border-double border-ink pb-4">
-        <Masthead size="md" />
+        <Masthead size="sm" className="!text-[1.7rem]" />
         <p className="mt-1 font-mono text-[10.5px] uppercase tracking-ultra text-ash">
           Bureau · Édition Vol. I
         </p>
-        <p className="font-serif text-sm italic text-graphite">Correspondance chiffrée — Fait à la main.</p>
+        <p className="font-serif text-sm italic leading-snug text-graphite">
+          Correspondance chiffrée — Fait à la main.
+        </p>
       </div>
 
       <section className="leaf p-4">
