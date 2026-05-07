@@ -1,3 +1,7 @@
+/* Ghostinator API dev (fallback Express).
+   Même surface d'API que worker/src/index.js. Choisit Supabase si
+   SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY sont présents, sinon JSON local. */
+
 import { createClient } from "@supabase/supabase-js";
 import cors from "cors";
 import "dotenv/config";
@@ -18,10 +22,50 @@ const supabase = hasSupabase
     })
   : null;
 
+const ALLOWED_ORIGINS = [
+  "http://127.0.0.1:5173",
+  "http://localhost:5173",
+  "https://ghostinator.pages.dev",
+];
+
 const app = express();
 
-app.use(cors({ origin: true }));
+app.use((req, res, next) => {
+  res.set("x-content-type-options", "nosniff");
+  res.set("x-frame-options", "DENY");
+  res.set("referrer-policy", "no-referrer");
+  res.set(
+    "permissions-policy",
+    "geolocation=(), microphone=(), camera=(), payment=(), interest-cohort=()",
+  );
+  next();
+});
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      if (ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
+      callback(new Error("Origin non autorisé"));
+    },
+    methods: ["GET", "POST", "DELETE", "OPTIONS"],
+    allowedHeaders: ["content-type", "x-signature", "x-pow", "x-turnstile"],
+    maxAge: 600,
+  }),
+);
 app.use(express.json({ limit: "256kb" }));
+
+function logEvent(level, msg, fields = {}) {
+  console.log(
+    JSON.stringify({
+      ts: new Date().toISOString(),
+      level,
+      service: "ghostinator-api-dev",
+      msg,
+      ...fields,
+    }),
+  );
+}
 
 function now() {
   return new Date().toISOString();
@@ -67,6 +111,127 @@ function encryptedPayload(input) {
   };
 }
 
+function base64ToBytes(value) {
+  return Uint8Array.from(Buffer.from(value, "base64"));
+}
+
+async function sha256Hex(value) {
+  const input = typeof value === "string" ? new TextEncoder().encode(value) : value;
+  const digest = await crypto.subtle.digest("SHA-256", input);
+  return [...new Uint8Array(digest)]
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function verifySignature({ pubkeyB64, header, method, path, body }) {
+  if (typeof header !== "string" || !header.includes(".")) {
+    const error = new Error("X-Signature manquant");
+    error.status = 401;
+    throw error;
+  }
+  const dot = header.indexOf(".");
+  const timestamp = header.slice(0, dot);
+  const signatureB64 = header.slice(dot + 1);
+  const ts = Number(timestamp);
+  const age = Math.abs(Date.now() - ts);
+  if (!Number.isFinite(ts) || age > 60_000) {
+    const error = new Error("Signature expirée");
+    error.status = 401;
+    throw error;
+  }
+  const bodyHash = await sha256Hex(body || "");
+  const message = `${method}.${path}.${timestamp}.${bodyHash}`;
+  const pubkey = await crypto.subtle.importKey(
+    "raw",
+    base64ToBytes(pubkeyB64),
+    { name: "Ed25519" },
+    false,
+    ["verify"],
+  );
+  const ok = await crypto.subtle.verify(
+    "Ed25519",
+    pubkey,
+    base64ToBytes(signatureB64),
+    new TextEncoder().encode(message),
+  );
+  if (!ok) {
+    const error = new Error("Signature invalide");
+    error.status = 401;
+    throw error;
+  }
+}
+
+async function verifyPow({ challenge, nonce, bits }) {
+  if (typeof nonce !== "string" || nonce.length === 0 || nonce.length > 64) {
+    const error = new Error("X-Pow manquant ou invalide");
+    error.status = 400;
+    throw error;
+  }
+  const digest = new Uint8Array(
+    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(challenge + nonce)),
+  );
+  let zeros = 0;
+  for (const byte of digest) {
+    if (byte === 0) {
+      zeros += 8;
+      continue;
+    }
+    let mask = 0x80;
+    while (mask && (byte & mask) === 0) {
+      zeros += 1;
+      mask >>= 1;
+    }
+    break;
+  }
+  if (zeros < bits) {
+    const error = new Error("Proof-of-Work insuffisant");
+    error.status = 400;
+    throw error;
+  }
+}
+
+const RATE_BUCKETS = new Map();
+async function rateLimit({ pubkeyB64, route, max }) {
+  const day = new Date().toISOString().slice(0, 10);
+  const secret = process.env.RATELIMIT_SECRET || "dev-secret";
+  const key = await sha256Hex(`${pubkeyB64}.${day}.${secret}.${route}`);
+  const slot = RATE_BUCKETS.get(key) || { count: 0, expires: Date.now() + 24 * 3600 * 1000 };
+  if (Date.now() > slot.expires) {
+    slot.count = 0;
+    slot.expires = Date.now() + 24 * 3600 * 1000;
+  }
+  slot.count += 1;
+  RATE_BUCKETS.set(key, slot);
+  if (slot.count > max) {
+    const error = new Error("Trop de requêtes — réessayez plus tard");
+    error.status = 429;
+    throw error;
+  }
+}
+
+async function verifyTurnstile({ token }) {
+  if (!process.env.TURNSTILE_SECRET_KEY) return; // dev mode
+  if (typeof token !== "string" || token.length === 0) {
+    const error = new Error("Turnstile token manquant");
+    error.status = 400;
+    throw error;
+  }
+  const form = new URLSearchParams();
+  form.set("secret", process.env.TURNSTILE_SECRET_KEY);
+  form.set("response", token);
+  const res = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: form.toString(),
+  });
+  const data = await res.json();
+  if (!data.success) {
+    const error = new Error("Turnstile invalide");
+    error.status = 400;
+    throw error;
+  }
+}
+
 function seedDb() {
   return {
     users: [],
@@ -87,14 +252,6 @@ function seedDb() {
         replies: 21,
         createdAt: now(),
       },
-      {
-        id: id("post"),
-        authorUsername: "9d03aa",
-        authorHash: "9d03aa742fd984ee4891be93bf3341e66dbbd962f5d929aee726342fdd4acb18",
-        body: "Posts publics, DM privés, groupes chiffrés — trois contrats de confidentialité explicites.",
-        replies: 13,
-        createdAt: now(),
-      },
     ],
     conversations: [],
     groups: [
@@ -109,19 +266,6 @@ function seedDb() {
           cipher: "v2.demo.group.ciphertext.zero-knowledge-intro",
         },
         memberCount: 12,
-        createdAt: now(),
-      },
-      {
-        id: id("grp"),
-        ownerHash: "0000000000000000000000000000000000000000000000000000000000000000",
-        ownerUsername: "leah.cipher",
-        name: "Atelier PWA",
-        topic: "Cloudflare Pages, Worker API, service worker et stockage local des clés.",
-        encryptedIntro: {
-          iv: "k6i9o1Y+Qbxq5a3L",
-          cipher: "v2.demo.group.ciphertext-pwa-workshop",
-        },
-        memberCount: 7,
         createdAt: now(),
       },
     ],
@@ -164,7 +308,8 @@ const jsonRepo = {
       id: id("usr"),
       username: input.username,
       publicHash: input.publicHash,
-      publicKey: input.publicKey,
+      publicKeyEd25519: input.publicKeyEd25519,
+      publicKeyX25519: input.publicKeyX25519,
       createdAt: now(),
     };
     db.users.unshift(user);
@@ -241,7 +386,8 @@ function mapUser(row) {
     id: row.id,
     username: row.username,
     publicHash: row.public_hash,
-    publicKey: row.public_key,
+    publicKeyEd25519: row.public_key_ed25519,
+    publicKeyX25519: row.public_key_x25519,
     createdAt: row.created_at,
   };
 }
@@ -273,7 +419,7 @@ function mapConversation(row) {
     ownerHash: row.owner_hash,
     peerHash: row.peer_hash,
     peerUsername: row.peer_username,
-    peerPublicKey: row.peer_public_key,
+    peerPublicKeyX25519: row.peer_public_key_x25519,
     createdAt: row.created_at,
     messages: (row.messages || []).map(mapMessage),
   };
@@ -311,7 +457,8 @@ const supabaseRepo = {
       .insert({
         username: input.username,
         public_hash: input.publicHash,
-        public_key: input.publicKey,
+        public_key_ed25519: input.publicKeyEd25519,
+        public_key_x25519: input.publicKeyX25519,
       })
       .select("*")
       .single();
@@ -392,7 +539,7 @@ const supabaseRepo = {
         owner_hash: input.ownerHash,
         peer_hash: input.peerHash,
         peer_username: input.peerUsername,
-        peer_public_key: input.peerPublicKey,
+        peer_public_key_x25519: input.peerPublicKeyX25519,
       })
       .select("*")
       .single();
@@ -434,6 +581,31 @@ const supabaseRepo = {
 
 const repo = hasSupabase ? supabaseRepo : jsonRepo;
 
+async function getUserPublicKeysOrThrow(hash) {
+  const user = await repo.getUserByHash(hash);
+  if (!user) {
+    const error = new Error("user introuvable");
+    error.status = 404;
+    throw error;
+  }
+  return { ed25519: user.publicKeyEd25519, x25519: user.publicKeyX25519 };
+}
+
+async function authBy({ req, authorHashField }) {
+  const authorHash = requireHash(req.body[authorHashField], authorHashField);
+  const keys = await getUserPublicKeysOrThrow(authorHash);
+  const rawBody = JSON.stringify(req.body);
+  await verifySignature({
+    pubkeyB64: keys.ed25519,
+    header: req.get("x-signature"),
+    method: req.method,
+    path: req.path,
+    body: rawBody,
+  });
+  await rateLimit({ pubkeyB64: keys.ed25519, route: req.path, max: 60 });
+  return { authorHash, keys };
+}
+
 app.get("/health", (_req, res) => {
   res.json({
     ok: true,
@@ -455,11 +627,32 @@ app.get("/api/bootstrap", async (req, res, next) => {
 
 app.post("/api/users", async (req, res, next) => {
   try {
+    const claimedPubkey = requireString(
+      req.body.publicKeyEd25519,
+      "publicKeyEd25519",
+      256,
+    );
+    const rawBody = JSON.stringify(req.body);
+    await verifySignature({
+      pubkeyB64: claimedPubkey,
+      header: req.get("x-signature"),
+      method: req.method,
+      path: req.path,
+      body: rawBody,
+    });
+    await verifyPow({
+      challenge: `signup:${claimedPubkey}`,
+      nonce: req.get("x-pow") || "",
+      bits: 18,
+    });
+    await verifyTurnstile({ token: req.get("x-turnstile") });
     const user = await repo.registerUser({
       username: requireUsername(req.body.username),
       publicHash: requireHash(req.body.publicHash, "publicHash"),
-      publicKey: requireString(req.body.publicKey, "publicKey", 256),
+      publicKeyEd25519: claimedPubkey,
+      publicKeyX25519: requireString(req.body.publicKeyX25519, "publicKeyX25519", 256),
     });
+    logEvent("info", "user registered", { hash_prefix: user.publicHash.slice(0, 6) });
     res.status(201).json(user);
   } catch (error) {
     next(error);
@@ -488,11 +681,19 @@ app.get("/api/users/:hash", async (req, res, next) => {
 
 app.post("/api/posts", async (req, res, next) => {
   try {
+    const { keys } = await authBy({ req, authorHashField: "authorHash" });
+    await verifyPow({
+      challenge: `post:${keys.ed25519}`,
+      nonce: req.get("x-pow") || "",
+      bits: 14,
+    });
+    await verifyTurnstile({ token: req.get("x-turnstile") });
     const post = await repo.createPost({
       authorUsername: requireUsername(req.body.authorUsername),
       authorHash: requireHash(req.body.authorHash, "authorHash"),
       body: requireString(req.body.body, "body", 280),
     });
+    logEvent("info", "post created", { id: post.id });
     res.status(201).json(post);
   } catch (error) {
     next(error);
@@ -501,11 +702,16 @@ app.post("/api/posts", async (req, res, next) => {
 
 app.post("/api/conversations", async (req, res, next) => {
   try {
+    await authBy({ req, authorHashField: "ownerHash" });
     const conversation = await repo.createConversation({
       ownerHash: requireHash(req.body.ownerHash, "ownerHash"),
       peerHash: requireHash(req.body.peerHash, "peerHash"),
       peerUsername: requireUsername(req.body.peerUsername),
-      peerPublicKey: requireString(req.body.peerPublicKey, "peerPublicKey", 256),
+      peerPublicKeyX25519: requireString(
+        req.body.peerPublicKeyX25519,
+        "peerPublicKeyX25519",
+        256,
+      ),
     });
     res.status(201).json(conversation);
   } catch (error) {
@@ -515,6 +721,7 @@ app.post("/api/conversations", async (req, res, next) => {
 
 app.post("/api/conversations/:id/messages", async (req, res, next) => {
   try {
+    await authBy({ req, authorHashField: "authorHash" });
     const message = await repo.createMessage(req.params.id, {
       authorHash: requireHash(req.body.authorHash, "authorHash"),
       authorUsername: requireUsername(req.body.authorUsername),
@@ -529,6 +736,7 @@ app.post("/api/conversations/:id/messages", async (req, res, next) => {
 
 app.post("/api/groups", async (req, res, next) => {
   try {
+    await authBy({ req, authorHashField: "ownerHash" });
     const group = await repo.createGroup({
       ownerHash: requireHash(req.body.ownerHash, "ownerHash"),
       ownerUsername: requireUsername(req.body.ownerUsername),
@@ -543,7 +751,9 @@ app.post("/api/groups", async (req, res, next) => {
 });
 
 app.use((error, _req, res, _next) => {
-  res.status(error.status || 500).json({ error: error.message || "Erreur serveur" });
+  const status = error.status || 500;
+  logEvent(status >= 500 ? "error" : "warn", error.message || "Erreur serveur", { status });
+  res.status(status).json({ error: error.message || "Erreur serveur" });
 });
 
 if (process.env.NODE_ENV === "production") {
@@ -553,7 +763,8 @@ if (process.env.NODE_ENV === "production") {
 }
 
 app.listen(port, "127.0.0.1", () => {
-  console.log(
-    `Ghostinator API listening on http://127.0.0.1:${port} (${hasSupabase ? "Supabase" : "JSON"} mode)`,
-  );
+  logEvent("info", "API listening", {
+    url: `http://127.0.0.1:${port}`,
+    mode: hasSupabase ? "supabase" : "json",
+  });
 });
